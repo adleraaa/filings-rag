@@ -15,9 +15,11 @@ https://adleraaa.github.io/filings-rag/
 Short version: plain dense retrieval (`bge-small-en-v1.5`) was the best setup; adding BM25 through
 reciprocal rank fusion made it significantly worse, and cross-encoder reranking did not help
 significantly. With the right page in context DeepSeek answered 76% of questions correctly
-(LLM-judged), without it 22%. The citation check does **not** catch wrong answers: the wrong
+(LLM-judged), without it 22%. The citation check does **not** catch wrong answers: most wrong
 answers cite numbers that really are on the cited pages, but pick the wrong line item or draw the
-wrong conclusion.
+wrong conclusion. A corruption test shows what the check can do: it rejects 97-99% of corrupted
+large numbers (100 and up) but still accepts 33-44% of corrupted small ones (percentages,
+ratios, per-share values).
 
 All numbers below are copied from files in `results/`, produced by the commands in
 [Reproduce](#quickstart--reproduce). Hardware: laptop, Intel i9-14900HX, CPU only for retrieval
@@ -25,10 +27,14 @@ All numbers below are copied from files in `results/`, produced by the commands 
 
 ### 1. Retrieval: which setup finds the evidence page? (`results/retrieval_ablation.md`)
 
-150 questions. **hit@k** = share of questions with at least one gold evidence page among the top k
-distinct pages (chunk rankings are collapsed to pages). **doc-scoped** filters to the question's
-filing; **corpus-wide** searches all 84 filings, where a page counts only if it is in the right
-filing. `doc_hit@5` = the right filing appears at all in the top 5 pages.
+150 questions. Each query retrieves the top 30 chunks, which are collapsed to their first 10
+distinct pages. **hit@k** = share of questions with at least one gold evidence page among the top
+k pages. **recall@k** = share of a question's gold pages found in the top k, averaged over
+questions; it is lower than hit@k because 35 questions have more than one gold page (dense,
+doc-scoped: recall@5 0.540 vs hit@5 0.587). Recall@1/3/5/10 for every config are in
+`results/retrieval_ablation.md`; the table below shows hit@k. **doc-scoped** filters to the
+question's filing; **corpus-wide** searches all 84 filings, where a page counts only if it is in
+the right filing. `doc_hit@5` = the right filing appears at all in the top 5 pages.
 
 | scope | method | hit@1 | hit@3 | hit@5 | hit@10 | MRR@10 | doc_hit@5 | median latency |
 |---|---|---|---|---|---|---|---|---|
@@ -72,10 +78,12 @@ What this says:
 
 Index (`results/ingest_stats.json`): 84 filings, 12,013 pages (65 with no extractable text),
 33,998 chunks; median chunk length 308 tokens (bge tokenizer), 1.4% of chunks exceed the 512-token
-model window and are truncated. FinanceBench `evidence_page_num` is a 0-based index: the evidence
-snippet was found on the labelled page (index + 1) for 157 of 189 evidence items, and on the
-neighbouring pages for 7; the remaining 25 did not match because PyMuPDF and the dataset's
-extractor break text differently.
+model window and are truncated. FinanceBench `evidence_page_num` is a 0-based index: a 100-character
+evidence snippet was found verbatim on the labelled page (index + 1) for 157 of 189 evidence items.
+It was also found on the page before (2) or after (5), but only for items that were also on the
+labelled page (repeated text). The other 32 items were found on none of the three pages; all 32
+match the labelled page once spaces and punctuation are ignored, so the two PDF text extractors
+differ in layout, not in page numbering.
 
 ### 2. Generation with citations (`results/generation_summary.md`)
 
@@ -93,11 +101,28 @@ strict rubric (numbers within 1% or rounding; unit changes allowed).
 | gold page among the 8 chunks | 92 | 70 | 9 | 13 | 0.761 |
 | gold page not retrieved | 58 | 13 | 6 | 39 | 0.224 |
 
-The model refuses much more often than it hallucinates (52 refusals vs 15 wrong answers). Most
-refusals (39 of 52) happen when retrieval missed the gold page, so retrieval is the bottleneck.
-Some answers are correct without the labelled page because another page repeats the figure: 3M's
-2018 capital spending ($1,577M) is labelled on the cash-flow statement (p.60) but also appears in
-the MD&A on p.39, which is what the model cited.
+The columns are the judge's verdicts. The model refuses much more often than it answers wrongly
+(52 judged refusals vs 15 judged incorrect). Most refusals (39 of 52) happen when retrieval missed
+the gold page, so retrieval is the bottleneck. Some answers are correct without the labelled
+page because another page repeats the figure: 3M's 2018 capital spending ($1,577M) is labelled
+on the cash-flow statement (p.60) but also appears in the MD&A on p.39, which is what the model
+cited.
+
+The model often hedges: it states some figures with citations and then adds the "Not found"
+sentence for the rest. A rule (`Answer.status`) labels an answer **partial** when it contains that
+sentence and also states a number (years excluded), and **refusal** when it contains the sentence
+and no number. Rule vs judge (`status_vs_verdict` in `results/generation_summary.json`):
+
+| rule status | judged correct | judged incorrect | judged refusal |
+|---|---|---|---|
+| answered (96) | 82 | 13 | 1 |
+| partial (7) | 1 | 2 | 4 |
+| refusal (47) | 0 | 0 | 47 |
+
+The rule and the judge disagree on whether 5 answers are refusals: the judge calls 1 answered
+text a refusal (it explains why a quick ratio cannot be computed) and 4 of the 7 partial answers;
+it grades the other 3 partial answers 1 correct and 2 incorrect. Before this split, all 7 partial
+answers were counted as refusals and skipped by the citation check.
 
 **Caveat on accuracy:** verdicts come from an LLM judge (the same model family that wrote the
 answers) and were not checked by a human. Read them as a relative signal. Every verdict and its
@@ -105,28 +130,69 @@ one-line reason is in `results/generation.jsonl` and in the explorer.
 
 ### 3. Does a cheap citation check catch unsupported answers?
 
-The check (`citation_check.py`, no LLM) flags a non-refusal answer if it has no citation, cites a
-page that was not in its context, or states a number that cannot be traced to a cited page
-(rounding and thousand/million/percent scaling allowed). Two variants: **verbatim** (every number
-must be on the page) and **arithmetic** (a number may also be one arithmetic step, applied up to
-twice, from numbers already traced: sum, difference, product, ratio, average, relative change).
+The check (`citation_check.py`, no LLM) flags an answered or partial answer if it has no
+citation, cites a page that was not in its context, or states a number that cannot be traced to a
+cited page (rounding and thousand/million/percent scaling allowed). Modes:
 
-| on 96 non-refusal answers | verbatim | arithmetic |
-|---|---|---|
-| flagged | 35 (36%) | 3 (3%) |
-| judge accuracy of flagged answers | 0.914 | 1.000 |
-| judge accuracy of unflagged answers | 0.820 | 0.850 |
-| AUROC, flag predicts a wrong answer | 0.41 | 0.48 |
-| AUROC, low answer-to-cited-chunk cosine similarity predicts a wrong answer | 0.43 | |
+- **verbatim**: every number must be on a cited page.
+- **arithmetic**: a number may also be one difference, ratio or relative change (optionally as a
+  percentage) of two numbers the answer already traced to the page.
+- **arithmetic_loose**: the first version of the arithmetic mode, kept only for comparison. It also
+  allowed sums, products and averages of any traced pair, applied twice, with thousand/million
+  rescaling of the derived values, so each answer produced thousands of candidate values.
 
-Answer: **no, not on this data.** Every verbatim flag came from an unsupported number, and 32 of the 35
-flagged answers were judged correct: they were computed ratios and averages, which the verbatim
-rule cannot trace. The arithmetic variant removes those false alarms but still catches no wrong
-answers. Reading the 15 wrong answers (all in the explorer) shows why: their numbers are real and on the
-cited page, but the answer uses the wrong line item (segment store counts instead of the total),
-leaves out part of what was asked, or reaches the wrong conclusion. No citation was missing or pointed outside the
-context. A check that only asks "is this number on the page?" cannot see those errors. Embedding
-similarity between the answer and its cited chunks did no better than chance either (AUROC 0.43).
+"Wrong" below means *not judged correct* (judged incorrect, or judged a refusal although the text
+states numbers): 20 of the 103 checked answers (15 incorrect, 5 judged refusal). Intervals are 95%
+paired bootstrap intervals over answers (2,000 resamples).
+
+| on 103 answered or partial answers | verbatim | arithmetic | arithmetic_loose |
+|---|---|---|---|
+| flagged | 36 (35%) | 13 (13%) | 3 (3%) |
+| wrong answers flagged / not flagged | 4 / 16 | 1 / 19 | 0 / 20 |
+| judge accuracy, flagged | 0.889 | 0.923 | 1.000 |
+| judge accuracy, not flagged | 0.761 | 0.789 | 0.800 |
+| accuracy gap, flagged minus not flagged | +0.13 [-0.02, +0.27] | +0.13 [-0.07, +0.27] | +0.20 [+0.12, +0.28] |
+| AUROC, flag predicts a wrong answer | 0.41 [0.31, 0.52] | 0.45 [0.40, 0.52] | 0.48 [0.46, 0.50] |
+
+**Is the check tight enough to catch a wrong number at all? (false-accept baseline,
+`null_baseline.py`)** For every number a mode accepted in the real answers, one at a time, the
+number is corrupted and the check re-run. Share of corrupted numbers still accepted:
+
+| corruption | numbers | verbatim | arithmetic | arithmetic_loose |
+|---|---|---|---|---|
+| x1.1 (10% too high) | all | 0.13 (60/453) | 0.14 (70/495) | 0.16 (83/521) |
+| | below 100 | 0.37 (57/155) | 0.35 (65/186) | 0.41 (77/190) |
+| | 100 and up | 0.010 (3/298) | 0.016 (5/309) | 0.018 (6/331) |
+| adjacent digits swapped | all | 0.11 (43/406) | 0.13 (56/447) | 0.15 (69/473) |
+| | below 100 | 0.34 (40/117) | 0.33 (49/148) | 0.39 (60/152) |
+| | 100 and up | 0.010 (3/289) | 0.023 (7/299) | 0.028 (9/321) |
+| random, same digit count | all | 0.17 (82/484) | 0.17 (88/531) | 0.18 (101/555) |
+| | below 100 | 0.41 (77/186) | 0.39 (86/222) | 0.44 (98/224) |
+| | 100 and up | 0.017 (5/298) | 0.007 (2/309) | 0.009 (3/331) |
+
+Answer: **no, not on this data, and the check is only meaningful for large numbers.**
+
+- For dollar amounts and other numbers of 100 and up, every mode rejects 97-99% of corrupted
+  values, so a wrong large figure would be caught. For numbers below 100 (percentages, ratios,
+  per-share values) even the verbatim mode accepts 34-41% of corrupted values: a financial
+  statement page holds hundreds of small numbers, and rounding plus unit/percent scaling makes a
+  chance match likely. A clean result on a percentage says little.
+- The loose arithmetic mode was 1-5 points more permissive than verbatim; the strict mode is
+  close to verbatim on false accepts while flagging 13% of answers instead of 35%. Most verbatim
+  flags (32 of 36) are on answers judged correct: computed ratios the verbatim rule cannot trace.
+  Verbatim flag rate is 65% on metrics-generated questions (mostly computed ratios) and 12-21% on
+  the other types, so its flags mostly track question type.
+- With 20 wrong answers, of which the best mode flags 4, the data cannot support any directional
+  claim: both AUROC intervals of the usable modes include 0.5, and both accuracy-gap intervals
+  include 0. The loose mode's interval excludes 0 only because its 3 flags all landed on correct
+  answers.
+- Why the wrong answers pass: no checked answer lacked a citation or cited a page outside its
+  context, and 12 of the 15 answers judged incorrect pass even the verbatim check: every number
+  they state matches a number on a cited page. Reading them (all in the explorer) shows a wrong line item
+  (segment store counts instead of the total), a missing part of what was asked, or a wrong
+  conclusion. A check that only asks "is this number on the page?" cannot see those errors.
+- Embedding similarity between the answer and its cited chunks did no better than chance either
+  (AUROC 0.42 for low similarity predicting a wrong answer).
 
 Spend (`results/spend.json`, all calls ever made by this repo): 311 API calls (150 answers, 150
 judgements, a smoke test, a 4-question pilot and one `ask` demo), 536,611 prompt tokens and 18,183
@@ -153,11 +219,15 @@ PDFs (84 filings) --PyMuPDF--> pages (1-based) --250-word windows, 50 overlap-->
           LLM judge vs gold answer (DeepSeek)                citation check (no LLM): citations present,
                                                              cited pages in context, every number found
                                                              on a cited page (rounding/unit aware)
+                                                                          |
+                                                             false-accept baseline: corrupt one number,
+                                                             re-check, count how often it still passes
 ```
 
 Modules (`src/filings_rag/`): `data` (questions, download), `ingest` (PDF to chunks), `retrieval`
 (BM25, dense, RRF, rerank), `metrics`, `eval_retrieval`, `generate`, `judge`, `citation_check`,
-`llm` (DeepSeek client, spend cap), `eval_generation`, `bootstrap`, `mcp_server`, `cli`.
+`claims` (numbers in text), `null_baseline` (false-accept test), `llm` (DeepSeek client, spend
+cap), `eval_generation`, `bootstrap`, `mcp_server`, `cli`.
 
 ## Quickstart / reproduce
 
@@ -173,10 +243,13 @@ filings-rag eval-retrieval --methods dense_rerank --rerankers minilm    # merged
 filings-rag bootstrap         # paired bootstrap CIs -> results/retrieval_bootstrap.json
 echo "DEEPSEEK_API_KEY=..." > .env
 filings-rag eval-generation --k 8   # best doc-scoped config (dense) -> results/generation_*, results/spend.json
+# Re-running eval-generation on a complete results/generation.jsonl makes no API calls; it re-classifies
+# answers and recomputes checks, bootstrap intervals and the false-accept baseline. It refuses to resume
+# a file produced with another method/scope/k (see results/generation.config.json).
 filings-rag export-explorer   # explorer/explorer.json for the static page
 
 filings-rag ask "What was 3M's FY2018 capital expenditure?" --company 3M   # default method: dense
-pytest && ruff check .        # 38 offline tests; no models, data or API key needed
+pytest && ruff check .        # 47 offline tests; no models, data or API key needed
 ```
 
 MCP server (stdio), for Claude Desktop or any MCP client:
@@ -185,7 +258,10 @@ MCP server (stdio), for Claude Desktop or any MCP client:
 {"mcpServers": {"filings": {"command": "filings-rag", "args": ["serve-mcp"], "cwd": "/path/to/filings-rag"}}}
 ```
 
-It exposes `search_filings(query, company=None, k=5)` and `get_page(doc, page)`.
+It exposes `search_filings(query, company=None, k=5)` and `get_page(doc, page)`. `company` is
+matched against the filing-name prefix, ignoring case, punctuation and legal suffixes
+("Johnson & Johnson" -> `JOHNSON_JOHNSON_*`, "AES Corporation" -> `AES_2022_10K`); an unknown
+company returns an error that lists the known ones.
 `python scripts/mcp_smoke.py` starts the server as a subprocess and calls both tools over stdio.
 
 ## Design decisions
@@ -206,9 +282,14 @@ It exposes `search_filings(query, company=None, k=5)` and `get_page(doc, page)`.
   (all input uncached, `max_tokens` output) would cross the cap. It resumes from `results/spend.json`,
   so the cap covers all runs together. Generation results are appended per question and a
   re-run skips finished questions, so a crash never pays twice, and re-running
-  `eval-generation` after a completed run recomputes the checks with zero API calls.
+  `eval-generation` after a completed run recomputes the checks with zero API calls. The run's
+  config is stored next to the results, so a resume with a different `--k` or method fails
+  instead of silently mixing two configurations.
+- **Measure the checker, not only the answers.** A check that flags few answers can be either
+  precise or blind. Corrupting numbers the check accepted and re-running it gives a false-accept
+  rate that says which: here it is blind to small numbers and reliable for large ones.
 - **Models behind small interfaces (`Embedder`, `Reranker`, `ChatModel`).** Tests plug in a hashed
-  bag-of-words embedder, a word-overlap reranker and a scripted LLM, so the 38 tests and CI need no
+  bag-of-words embedder, a word-overlap reranker and a scripted LLM, so the 47 tests and CI need no
   PyTorch, no model downloads, no dataset and no API key.
 
 ## Limitations
@@ -226,7 +307,15 @@ It exposes `search_filings(query, company=None, k=5)` and `get_page(doc, page)`.
 - Generation was run on one configuration (dense, doc-scoped, 8 chunks). Corpus-wide generation
   and the effect of `k` on accuracy were not measured.
 - The citation check only reasons about numbers. It cannot detect a wrong line item, a wrong period
-  or a wrong conclusion, which is where this system's errors actually were.
+  or a wrong conclusion, which is where this system's errors actually were. It ignores signs
+  (one wrong answer reported -0.6% where the gold is 0.62%), and for numbers below 100 it accepts
+  about a third or more of corrupted values (section 3).
+- The partial/refusal split is a rule (does the text state a number?), not a judgement; it
+  disagrees with the LLM judge about refusals on 5 of 150 answers. The raw `results/generation.jsonl` still has
+  the older boolean `refusal` field written at generation time; the status used in the tables is
+  recomputed from the answer text.
+- The false-accept baseline uses synthetic corruptions (x1.1, digit swap, random); real model
+  errors (a wrong line item) are different and, as section 3 shows, mostly pass the check.
 - Latencies were measured on a shared laptop CPU while other jobs ran; treat them as orders of
   magnitude.
 
@@ -235,9 +324,14 @@ It exposes `search_filings(query, company=None, k=5)` and `get_page(doc, page)`.
 - FinanceBench open-source sample, Patronus AI, https://github.com/patronus-ai/financebench
   (paper: Islam et al., 2023, arXiv:2311.11944). The GitHub repo has no license file; the
   Hugging Face dataset card (https://huggingface.co/datasets/PatronusAI/financebench) lists
-  **CC BY-NC 4.0**. This repo does not commit the questions or PDFs; `filings-rag download` fetches
-  them. Files under `results/` and `explorer/explorer.json` quote FinanceBench questions and gold
-  answers for non-commercial evaluation purposes, with this attribution.
+  **CC BY-NC 4.0**. This repo does not commit the raw question file or the PDFs;
+  `filings-rag download` fetches them. However, `results/generation.jsonl`,
+  `results/generation_with_similarity.jsonl` and `explorer/explorer.json` (also served on the
+  Pages site) contain all 150 questions, gold answers and evidence page numbers (converted to
+  1-based). That content stays under CC BY-NC 4.0 (non-commercial use, attribution to Patronus AI)
+  and is **not** covered by this repo's MIT licence; see `results/NOTICE`.
+- Answers and judge verdicts in those files were generated by DeepSeek (`deepseek-v4-flash`).
 - Models: `BAAI/bge-small-en-v1.5` (MIT), `cross-encoder/ms-marco-MiniLM-L-6-v2` (Apache-2.0),
   `BAAI/bge-reranker-base` (MIT), downloaded from Hugging Face at run time.
-- Code: MIT, Copyright (c) 2026 Yunlong Lu. See `LICENSE`.
+- Code: MIT, Copyright (c) 2026 Yunlong Lu. See `LICENSE`. The MIT licence covers the code only,
+  not the FinanceBench content listed above.
