@@ -3,12 +3,13 @@ import json
 
 import pytest
 
-from filings_rag.cli import best_config, build_parser
+from filings_rag.cli import best_config, build_parser, export_explorer
 from filings_rag.data import Question
 from filings_rag.eval_generation import add_similarity, auroc, run_generation, summarize, to_markdown
 from filings_rag.eval_retrieval import run_ablation
 from filings_rag.llm import BudgetExceeded, SpendTracker
 from filings_rag.mcp_server import build_server, docs_for_company
+from filings_rag.retrieval import METHODS
 
 from .conftest import FakeLLM, HashEmbedder
 
@@ -84,6 +85,20 @@ def test_generation_run_resumes_and_summarises(index, tmp_path):
     assert s["citation_check"]["unflagged_judge"]["accuracy"] == 1.0
     assert s["citation_check"]["auroc_flag_predicts_wrong"] == 1.0
     assert "| all | 2 | 1 | 1 | 0 | 0.500 |" in to_markdown(s)
+
+
+def test_export_explorer_joins_retrieval_and_generation(index, tmp_path):
+    run_ablation(index.retriever, QUESTIONS, tmp_path)
+    answers = FakeLLM(["$1,577 million [ACME_2022_10K p.2].", "Not found in the provided pages."])
+    judge = FakeLLM(['{"verdict": "correct", "reason": "ok"}', '{"verdict": "refusal", "reason": "-"}'])
+    rows = run_generation(index, QUESTIONS, answers, judge, tmp_path / "g.jsonl", "bm25", "doc", k=2)
+    (tmp_path / "generation_with_similarity.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    data = export_explorer(tmp_path)
+    assert [q["qid"] for q in data["questions"]] == ["q1", "q2"]
+    q2 = data["questions"][1]
+    assert q2["verdict"] == "refusal" and q2["doc"] == "GLOBEX_2021_10K"
+    assert set(q2["retrieval"]) == {f"{s}/{m}" for s in ("doc", "corpus") for m in METHODS}
+    assert all(len(pages) <= 5 for pages in q2["retrieval"].values())
 
 
 def test_auroc():

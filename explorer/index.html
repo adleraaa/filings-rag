@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>filings-rag results</title>
+<style>
+  :root {
+    --bg: #fbfbfa; --fg: #1d1d1b; --muted: #6b6a66; --line: #e3e2de; --card: #ffffff;
+    --ok: #1f7a4d; --bad: #b3261e; --warn: #9a6700; --chip: #f0efeb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #161615; --fg: #ecebe7; --muted: #9c9b96; --line: #2e2e2b; --card: #1e1e1c;
+      --ok: #5cc98f; --bad: #f2877e; --warn: #e3b341; --chip: #2a2a27;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #161615; --fg: #ecebe7; --muted: #9c9b96; --line: #2e2e2b; --card: #1e1e1c;
+    --ok: #5cc98f; --bad: #f2877e; --warn: #e3b341; --chip: #2a2a27;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  p.sub { color: var(--muted); margin: 0 0 20px; }
+  table.sum { border-collapse: collapse; width: 100%; margin: 8px 0 24px; font-size: 13px;
+              font-variant-numeric: tabular-nums; }
+  .scroll { overflow-x: auto; }
+  table.sum th, table.sum td { border-bottom: 1px solid var(--line); padding: 6px 8px; text-align: right; }
+  table.sum th:first-child, table.sum td:first-child,
+  table.sum th:nth-child(2), table.sum td:nth-child(2) { text-align: left; }
+  .filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 16px; }
+  .filters input, .filters select { font: inherit; padding: 6px 8px; border: 1px solid var(--line);
+      border-radius: 6px; background: var(--card); color: var(--fg); }
+  .filters input { flex: 1 1 220px; }
+  .q { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px;
+       margin: 0 0 12px; }
+  .q h3 { font-size: 15px; margin: 0 0 8px; font-weight: 600; }
+  .meta { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; font-size: 12px; }
+  .chip { background: var(--chip); border-radius: 999px; padding: 1px 8px; }
+  .correct { color: var(--ok); } .incorrect { color: var(--bad); } .refusal { color: var(--warn); }
+  .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em;
+           margin-top: 8px; }
+  .ans { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .pages { font-size: 13px; overflow-wrap: anywhere; }
+  .hit { font-weight: 700; color: var(--ok); }
+  details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-top: 8px; }
+  .count { color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>filings-rag results explorer</h1>
+  <p class="sub">FinanceBench open-source sample (150 questions, CC BY-NC 4.0, Patronus AI).
+    Retrieval ranks, DeepSeek answers, LLM-judge verdicts and citation-check flags produced by the
+    scripts in <a href="https://github.com/adleraaa/filings-rag">adleraaa/filings-rag</a>.
+    Verdicts come from an LLM judge, not from human review.</p>
+
+  <div class="scroll"><table class="sum" id="ablation"></table></div>
+
+  <div class="filters">
+    <input id="search" type="search" placeholder="Search question, company or answer">
+    <select id="verdict"><option value="">All verdicts</option><option>correct</option>
+      <option>incorrect</option><option>refusal</option></select>
+    <select id="flag"><option value="">Flagged or not</option><option value="1">Flagged</option>
+      <option value="0">Not flagged</option></select>
+    <select id="type"><option value="">All question types</option></select>
+  </div>
+  <div class="count" id="count"></div>
+  <div id="list"></div>
+</main>
+<script>
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const key = p => p[0] + " p." + p[1];
+
+function renderAblation(configs) {
+  const cols = ["hit@1", "hit@3", "hit@5", "hit@10", "mrr@10"];
+  const head = "<tr><th>scope</th><th>method</th>" + cols.map(c => `<th>${c}</th>`).join("") + "</tr>";
+  const rows = configs.map(c => `<tr><td>${c.scope}</td><td>${c.method}</td>` +
+    cols.map(k => `<td>${c[k].toFixed(3)}</td>`).join("") + "</tr>").join("");
+  document.getElementById("ablation").innerHTML = head + rows;
+}
+
+function renderQuestion(q) {
+  const gold = new Set(q.gold_pages.map(key));
+  const pageList = ps => ps.map(p => gold.has(key(p)) ? `<span class="hit">${esc(key(p))}</span>` : esc(key(p))).join(", ");
+  const retrieval = Object.entries(q.retrieval).map(([cfg, ps]) =>
+    `<div class="pages"><b>${esc(cfg)}</b>: ${pageList(ps)}</div>`).join("");
+  const flag = q.flagged ? `<span class="chip">flagged: ${esc(q.flag_reasons.join(", "))}</span>` : "";
+  return `<div class="q">
+    <h3>${esc(q.question)}</h3>
+    <div class="meta"><span class="chip">${esc(q.qid)}</span><span class="chip">${esc(q.doc)}</span>
+      <span class="chip">${esc(q.question_type)}</span>
+      <span class="chip ${q.verdict}">judge: ${esc(q.verdict)}</span>${flag}</div>
+    <div class="label">Model answer</div><div class="ans">${esc(q.answer)}</div>
+    <div class="label">Gold answer</div><div class="ans">${esc(q.gold_answer)}</div>
+    <div class="label">Judge reason</div><div class="ans">${esc(q.judge_reason)}</div>
+    <details><summary>Top-5 pages per retrieval config (gold pages in bold)</summary>
+      <div class="pages">Gold: ${esc(q.gold_pages.map(key).join(", "))}</div>${retrieval}</details>
+  </div>`;
+}
+
+fetch("explorer.json").then(r => r.json()).then(data => {
+  renderAblation(data.ablation);
+  const typeSel = document.getElementById("type");
+  [...new Set(data.questions.map(q => q.question_type))].sort()
+    .forEach(t => typeSel.insertAdjacentHTML("beforeend", `<option>${esc(t)}</option>`));
+  const inputs = ["search", "verdict", "flag", "type"].map(id => document.getElementById(id));
+  const update = () => {
+    const [s, v, f, t] = inputs.map(i => i.value);
+    const needle = s.trim().toLowerCase();
+    const shown = data.questions.filter(q =>
+      (!v || q.verdict === v) && (!f || String(+q.flagged) === f) && (!t || q.question_type === t) &&
+      (!needle || (q.question + " " + q.doc + " " + q.answer).toLowerCase().includes(needle)));
+    document.getElementById("count").textContent = `${shown.length} of ${data.questions.length} questions`;
+    document.getElementById("list").innerHTML = shown.map(renderQuestion).join("");
+  };
+  inputs.forEach(i => i.addEventListener("input", update));
+  update();
+});
+</script>
+</body>
+</html>

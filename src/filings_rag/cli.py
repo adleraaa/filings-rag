@@ -141,6 +141,44 @@ def cmd_serve_mcp(args: argparse.Namespace) -> None:
     build_server(load_index(args.index_dir)).run()
 
 
+def export_explorer(results: Path) -> dict:
+    """Join retrieval runs and generation rows into one JSON for the static page."""
+    ablation = json.loads((results / "retrieval_ablation.json").read_text(encoding="utf-8"))["configs"]
+    runs = json.loads((results / "retrieval_per_question.json").read_text(encoding="utf-8"))
+    gen_path = results / "generation_with_similarity.jsonl"
+    generated = {}
+    if gen_path.exists():
+        generated = {r["qid"]: r for r in map(json.loads, gen_path.open(encoding="utf-8"))}
+    questions = []
+    for i, first in enumerate(runs["doc/bm25"]):
+        g = generated.get(first["qid"], {})
+        questions.append(
+            {
+                "qid": first["qid"],
+                "question_type": first["question_type"],
+                "doc": first["gold"][0][0],
+                "gold_pages": first["gold"],
+                "question": g.get("question", ""),
+                "gold_answer": g.get("gold_answer", ""),
+                "answer": g.get("answer", ""),
+                "verdict": g.get("verdict", "not run"),
+                "judge_reason": g.get("judge_reason", ""),
+                "flagged": g.get("flagged", False),
+                "flag_reasons": g.get("flag_reasons", []),
+                # Top-5 pages of every config for this question (runs are in question order).
+                "retrieval": {cfg: rows[i]["ranked_pages"][:5] for cfg, rows in runs.items()},
+            }
+        )
+    return {"ablation": ablation, "questions": questions}
+
+
+def cmd_export_explorer(args: argparse.Namespace) -> None:
+    data = export_explorer(args.results)
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out.write_text(json.dumps(data), encoding="utf-8")
+    print(f"wrote {len(data['questions'])} questions to {args.out}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="filings-rag", description=__doc__)
     sub = p.add_subparsers(dest="command", required=True)
@@ -187,6 +225,11 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("serve-mcp", help="run the MCP server over stdio")
     s.add_argument("--index-dir", type=Path, default=INDEX)
     s.set_defaults(func=cmd_serve_mcp)
+
+    s = sub.add_parser("export-explorer", help="write explorer/explorer.json for the static site")
+    s.add_argument("--results", type=Path, default=RESULTS)
+    s.add_argument("--out", type=Path, default=Path("explorer") / "explorer.json")
+    s.set_defaults(func=cmd_export_explorer)
     return p
 
 
