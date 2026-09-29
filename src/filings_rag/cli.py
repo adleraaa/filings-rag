@@ -267,7 +267,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("question")
     s.add_argument("--company", default=None)
     s.add_argument("--doc", default=None, help="restrict to one filing, e.g. 3M_2018_10K")
-    s.add_argument("--method", type=method_label, default="hybrid_rerank[minilm]")
+    s.add_argument("--method", type=method_label, default="dense")
     s.add_argument("--k", type=int, default=5)
     s.add_argument("--index-dir", type=Path, default=INDEX)
     s.add_argument("--cap", type=float, default=3.0)
@@ -275,7 +275,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("serve-mcp", help="run the MCP server over stdio")
     s.add_argument("--index-dir", type=Path, default=INDEX)
-    s.add_argument("--method", type=method_label, default="hybrid_rerank[minilm]")
+    s.add_argument("--method", type=method_label, default="dense")
     s.set_defaults(func=cmd_serve_mcp)
 
     s = sub.add_parser("export-explorer", help="write explorer/explorer.json for the static site")

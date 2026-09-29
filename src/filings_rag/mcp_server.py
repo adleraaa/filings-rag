@@ -26,7 +26,7 @@ def docs_for_company(index: Index, company: str) -> list[str]:
     return [d for d in index.retriever.docs if _norm(d.split("_")[0]) == key]
 
 
-def build_server(index: Index, method: str = "hybrid_rerank") -> FastMCP:
+def build_server(index: Index, method: str = "dense") -> FastMCP:
     mcp = FastMCP("filings-rag")
 
     @mcp.tool()
@@ -59,7 +59,8 @@ def build_server(index: Index, method: str = "hybrid_rerank") -> FastMCP:
 
 def main() -> None:
     index_dir = Path(os.environ.get("FILINGS_RAG_INDEX", "data/index"))
-    build_server(load_index(index_dir)).run()  # stdio transport by default
+    # Dense retrieval was the best configuration in results/retrieval_ablation.md.
+    build_server(load_index(index_dir, reranker=None)).run()  # stdio transport by default
 
 
 if __name__ == "__main__":

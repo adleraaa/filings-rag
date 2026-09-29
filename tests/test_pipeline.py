@@ -159,7 +159,7 @@ def test_company_matching(index):
 
 def test_cli_parser():
     args = build_parser().parse_args(["ask", "What was capex?", "--company", "3M", "--k", "3"])
-    assert args.company == "3M" and args.k == 3 and args.method == "hybrid_rerank[minilm]"
+    assert args.company == "3M" and args.k == 3 and args.method == "dense"
     with pytest.raises(SystemExit):
         build_parser().parse_args(["eval-generation", "--method", "magic"])
 

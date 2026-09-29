@@ -7,21 +7,23 @@
 <style>
   :root {
     --bg: #fbfbfa; --fg: #1d1d1b; --muted: #6b6a66; --line: #e3e2de; --card: #ffffff;
-    --ok: #1f7a4d; --bad: #b3261e; --warn: #9a6700; --chip: #f0efeb;
+    --ok: #1f7a4d; --bad: #b3261e; --warn: #9a6700; --chip: #f0efeb; --link: #1a5fb4;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
       --bg: #161615; --fg: #ecebe7; --muted: #9c9b96; --line: #2e2e2b; --card: #1e1e1c;
-      --ok: #5cc98f; --bad: #f2877e; --warn: #e3b341; --chip: #2a2a27;
+      --ok: #5cc98f; --bad: #f2877e; --warn: #e3b341; --chip: #2a2a27; --link: #8ab4f8;
     }
   }
   :root[data-theme="dark"] {
     --bg: #161615; --fg: #ecebe7; --muted: #9c9b96; --line: #2e2e2b; --card: #1e1e1c;
-    --ok: #5cc98f; --bad: #f2877e; --warn: #e3b341; --chip: #2a2a27;
+    --ok: #5cc98f; --bad: #f2877e; --warn: #e3b341; --chip: #2a2a27; --link: #8ab4f8;
   }
+  :root { color-scheme: light dark; }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--fg);
          font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  a { color: var(--link); }
   main { max-width: 980px; margin: 0 auto; padding: 24px 16px 64px; }
   h1 { font-size: 22px; margin: 0 0 4px; }
   p.sub { color: var(--muted); margin: 0 0 20px; }
@@ -37,7 +39,7 @@
   .filters input { flex: 1 1 220px; }
   .q { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px;
        margin: 0 0 12px; }
-  .q h3 { font-size: 15px; margin: 0 0 8px; font-weight: 600; }
+  .q h3 { font-size: 15px; margin: 0 0 8px; font-weight: 600; overflow-wrap: anywhere; }
   .meta { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; font-size: 12px; }
   .chip { background: var(--chip); border-radius: 999px; padding: 1px 8px; }
   .correct { color: var(--ok); } .incorrect { color: var(--bad); } .refusal { color: var(--warn); }
