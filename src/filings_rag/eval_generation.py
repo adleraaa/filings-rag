@@ -14,7 +14,7 @@ import numpy as np
 
 from .citation_check import check_answer
 from .data import Question
-from .generate import _BRACKET, answer_question
+from .generate import _BRACKET, Answer, answer_question
 from .index import Index
 from .judge import judge
 from .llm import ChatModel
@@ -43,7 +43,6 @@ def run_generation(
             hits = index.retriever.search(q.question, method=method, k=k, docs=docs)
             ans = answer_question(answer_llm, q.question, hits)
             verdict = judge(judge_llm, q.question, q.answer, ans.text)
-            check = check_answer(ans, index.page_text)
             gold = {(q.doc, p) for p in q.evidence_pages}
             row = {
                 "qid": q.qid,
@@ -58,16 +57,34 @@ def run_generation(
                 "refusal": ans.is_refusal,
                 "verdict": verdict.verdict,
                 "judge_reason": verdict.reason,
-                "flagged": check.flagged,
-                "flag_reasons": check.reasons,
-                "numbers": check.numbers,
-                "numbers_supported": check.supported,
-                "unsupported_values": check.unsupported_values,
             }
             f.write(json.dumps(row) + "\n")
             f.flush()
-            print(f"{q.qid} {verdict.verdict:9s} flagged={check.flagged}")
+            print(f"{q.qid} {verdict.verdict}")
     return [json.loads(line) for line in out_path.open(encoding="utf-8")]
+
+
+CHECK_VARIANTS = {"verbatim": False, "arithmetic": True}
+
+
+def apply_checks(rows: list[dict], index: Index) -> None:
+    """Run both citation-check variants on stored answers (no API calls)."""
+    for r in rows:
+        ans = Answer(
+            r["answer"],
+            tuple(tuple(c) for c in r["citations"]),
+            tuple(tuple(c) for c in r["context_pages"]),
+        )
+        r["checks"] = {}
+        for name, arithmetic in CHECK_VARIANTS.items():
+            c = check_answer(ans, index.page_text, arithmetic=arithmetic)
+            r["checks"][name] = {
+                "flagged": c.flagged,
+                "reasons": c.reasons,
+                "numbers": c.numbers,
+                "supported": c.supported,
+                "unsupported_values": c.unsupported_values,
+            }
 
 
 def add_similarity(rows: list[dict], index: Index, embedder: Embedder) -> None:
@@ -98,46 +115,56 @@ def auroc(scores: Sequence[float], labels: Sequence[bool]) -> float | None:
     return round(wins / (len(pos) * len(neg)), 4)
 
 
-def summarize(rows: list[dict]) -> dict:
-    def acc(sub: list[dict]) -> dict:
-        n = len(sub)
-        return {
-            "n": n,
-            "correct": sum(r["verdict"] == "correct" for r in sub),
-            "incorrect": sum(r["verdict"] == "incorrect" for r in sub),
-            "refusal": sum(r["verdict"] == "refusal" for r in sub),
-            "accuracy": round(sum(r["verdict"] == "correct" for r in sub) / n, 4) if n else None,
-        }
+def _acc(sub: list[dict]) -> dict:
+    n = len(sub)
+    correct = sum(r["verdict"] == "correct" for r in sub)
+    return {
+        "n": n,
+        "correct": correct,
+        "incorrect": sum(r["verdict"] == "incorrect" for r in sub),
+        "refusal": sum(r["verdict"] == "refusal" for r in sub),
+        "accuracy": round(correct / n, 4) if n else None,
+    }
 
-    answered = [r for r in rows if not r["refusal"]]
-    flagged = [r for r in answered if r["flagged"]]
-    unflagged = [r for r in answered if not r["flagged"]]
+
+def _check_summary(answered: list[dict], variant: str) -> dict:
+    flagged = [r for r in answered if r["checks"][variant]["flagged"]]
+    unflagged = [r for r in answered if not r["checks"][variant]["flagged"]]
     reasons: dict[str, int] = {}
     for r in flagged:
-        for reason in r["flag_reasons"]:
+        for reason in r["checks"][variant]["reasons"]:
             reasons[reason] = reasons.get(reason, 0) + 1
-    with_sim = [r for r in answered if r.get("similarity") is not None]
-    wrong = [r["verdict"] != "correct" for r in with_sim]
     return {
-        "overall": acc(rows),
+        "flagged": len(flagged),
+        "flag_rate": round(len(flagged) / len(answered), 4) if answered else None,
+        "flag_reasons": reasons,
+        "flagged_judge": _acc(flagged),
+        "unflagged_judge": _acc(unflagged),
+        # How well the flag separates wrong from right answers (0.5 = chance).
+        "auroc_flag_predicts_wrong": auroc(
+            [float(r["checks"][variant]["flagged"]) for r in answered],
+            [r["verdict"] != "correct" for r in answered],
+        ),
+    }
+
+
+def summarize(rows: list[dict]) -> dict:
+    answered = [r for r in rows if not r["refusal"]]
+    with_sim = [r for r in answered if r.get("similarity") is not None]
+    return {
+        "overall": _acc(rows),
         "by_question_type": {
-            t: acc([r for r in rows if r["question_type"] == t])
+            t: _acc([r for r in rows if r["question_type"] == t])
             for t in sorted({r["question_type"] for r in rows})
         },
-        "gold_page_in_context": acc([r for r in rows if r["gold_in_context"]]),
-        "gold_page_not_in_context": acc([r for r in rows if not r["gold_in_context"]]),
+        "gold_page_in_context": _acc([r for r in rows if r["gold_in_context"]]),
+        "gold_page_not_in_context": _acc([r for r in rows if not r["gold_in_context"]]),
         "citation_check": {
             "answered": len(answered),
-            "flagged": len(flagged),
-            "flag_rate": round(len(flagged) / len(answered), 4) if answered else None,
-            "flag_reasons": reasons,
-            "flagged_judge": acc(flagged),
-            "unflagged_judge": acc(unflagged),
-            # How well each signal separates wrong from right answers (0.5 = chance).
-            "auroc_flag_predicts_wrong": auroc(
-                [float(r["flagged"]) for r in answered], [r["verdict"] != "correct" for r in answered]
+            **{v: _check_summary(answered, v) for v in CHECK_VARIANTS},
+            "auroc_low_similarity_predicts_wrong": auroc(
+                [-r["similarity"] for r in with_sim], [r["verdict"] != "correct" for r in with_sim]
             ),
-            "auroc_low_similarity_predicts_wrong": auroc([-r["similarity"] for r in with_sim], wrong),
         },
     }
 
@@ -154,13 +181,16 @@ def to_markdown(s: dict) -> str:
     lines.append(row("gold page retrieved", s["gold_page_in_context"]))
     lines.append(row("gold page not retrieved", s["gold_page_not_in_context"]))
     cc = s["citation_check"]
-    lines += ["", "| citation check | value |", "|---|---|"]
-    lines.append(f"| non-refusal answers | {cc['answered']} |")
-    lines.append(f"| flagged | {cc['flagged']} ({cc['flag_rate']}) |")
-    for reason, count in sorted(cc["flag_reasons"].items()):
-        lines.append(f"| reason: {reason} | {count} |")
-    lines.append(f"| judge accuracy, flagged | {cc['flagged_judge']['accuracy']} |")
-    lines.append(f"| judge accuracy, unflagged | {cc['unflagged_judge']['accuracy']} |")
-    lines.append(f"| AUROC flag -> wrong | {cc['auroc_flag_predicts_wrong']} |")
-    lines.append(f"| AUROC low similarity -> wrong | {cc['auroc_low_similarity_predicts_wrong']} |")
+    variants = list(CHECK_VARIANTS)
+    lines += ["", f"Citation check on {cc['answered']} non-refusal answers:", ""]
+    lines += ["| metric | " + " | ".join(variants) + " |", "|---|" + "---|" * len(variants)]
+
+    def metric(name: str, get) -> None:
+        lines.append(f"| {name} | " + " | ".join(str(get(cc[v])) for v in variants) + " |")
+
+    metric("flagged", lambda c: f"{c['flagged']} ({c['flag_rate']})")
+    metric("judge accuracy, flagged", lambda c: c["flagged_judge"]["accuracy"])
+    metric("judge accuracy, unflagged", lambda c: c["unflagged_judge"]["accuracy"])
+    metric("AUROC flag -> wrong", lambda c: c["auroc_flag_predicts_wrong"])
+    lines += ["", f"AUROC low answer/page similarity -> wrong: {cc['auroc_low_similarity_predicts_wrong']}"]
     return "\n".join(lines) + "\n"

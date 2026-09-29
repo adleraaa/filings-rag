@@ -7,7 +7,14 @@ import pytest
 
 from filings_rag.cli import best_config, build_parser, export_explorer, parse_method
 from filings_rag.data import Question
-from filings_rag.eval_generation import add_similarity, auroc, run_generation, summarize, to_markdown
+from filings_rag.eval_generation import (
+    add_similarity,
+    apply_checks,
+    auroc,
+    run_generation,
+    summarize,
+    to_markdown,
+)
 from filings_rag.eval_retrieval import run_ablation
 from filings_rag.llm import BudgetExceeded, SpendTracker
 from filings_rag.mcp_server import build_server, docs_for_company
@@ -78,8 +85,11 @@ def test_generation_run_resumes_and_summarises(index, tmp_path):
     out = tmp_path / "gen.jsonl"
     rows = run_generation(index, QUESTIONS, answers, judge, out, "hybrid_rerank", "doc", k=3)
     assert [r["verdict"] for r in rows] == ["correct", "incorrect"]
-    assert [r["flagged"] for r in rows] == [False, True]  # 9.99 is not on the cited page
     assert all(r["gold_in_context"] for r in rows)
+    apply_checks(rows, index)
+    for variant in ("verbatim", "arithmetic"):
+        # 9.99 is not on the cited page and cannot be derived from 2.40 alone.
+        assert [r["checks"][variant]["flagged"] for r in rows] == [False, True]
 
     # A second run must not call the models again.
     again = FakeLLM(["should not be used"])
@@ -90,10 +100,13 @@ def test_generation_run_resumes_and_summarises(index, tmp_path):
     assert all(0 < r["similarity"] <= 1 for r in rows)
     s = summarize(rows)
     assert s["overall"]["accuracy"] == 0.5
-    assert s["citation_check"]["flagged_judge"]["accuracy"] == 0.0
-    assert s["citation_check"]["unflagged_judge"]["accuracy"] == 1.0
-    assert s["citation_check"]["auroc_flag_predicts_wrong"] == 1.0
-    assert "| all | 2 | 1 | 1 | 0 | 0.500 |" in to_markdown(s)
+    cc = s["citation_check"]["arithmetic"]
+    assert cc["flagged_judge"]["accuracy"] == 0.0
+    assert cc["unflagged_judge"]["accuracy"] == 1.0
+    assert cc["auroc_flag_predicts_wrong"] == 1.0
+    md = to_markdown(s)
+    assert "| all | 2 | 1 | 1 | 0 | 0.500 |" in md
+    assert "| flagged | 1 (0.5) | 1 (0.5) |" in md
 
 
 def test_export_explorer_joins_retrieval_and_generation(index, tmp_path):
@@ -101,6 +114,7 @@ def test_export_explorer_joins_retrieval_and_generation(index, tmp_path):
     answers = FakeLLM(["$1,577 million [ACME_2022_10K p.2].", "Not found in the provided pages."])
     judge = FakeLLM(['{"verdict": "correct", "reason": "ok"}', '{"verdict": "refusal", "reason": "-"}'])
     rows = run_generation(index, QUESTIONS, answers, judge, tmp_path / "g.jsonl", "bm25", "doc", k=2)
+    apply_checks(rows, index)
     (tmp_path / "generation_with_similarity.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
     data = export_explorer(tmp_path)
     assert [q["qid"] for q in data["questions"]] == ["q1", "q2"]

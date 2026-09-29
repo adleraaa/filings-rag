@@ -79,3 +79,28 @@ def test_parse_verdict():
     assert parse_verdict('Sure! ```json\n{"verdict": "refusal", "reason": "x"}\n```').verdict == "refusal"
     assert parse_verdict("looks right to me").verdict == "incorrect"
     assert parse_verdict('{"verdict": "mostly"}').verdict == "incorrect"
+
+
+def test_arithmetic_mode_accepts_computed_values_only():
+    page = {("D", 1): "Operating income 1,493,602 and 903,095. Current assets 5,121.3 liabilities 7,491.5"}
+    text = (
+        "Operating income rose from $903,095 to $1,493,602 thousand [D p.1], "
+        "a change of $590,507 thousand or 65.4% [D p.1]."
+    )
+    ans = Answer(text, (("D", 1),), (("D", 1),))
+    verbatim = check_answer(ans, lambda d, p: page.get((d, p)))
+    assert verbatim.flagged and verbatim.unsupported_values == [590507.0, 65.4]
+    assert not check_answer(ans, lambda d, p: page.get((d, p)), arithmetic=True).flagged
+
+    # Two steps: average of two page values, then a ratio against a third.
+    two_step = Answer(
+        "Assets 5,121.3 and liabilities 7,491.5 average 6,306.4; 5,121.3 / 6,306.4 = 0.81 [D p.1].",
+        (("D", 1),),
+        (("D", 1),),
+    )
+    assert not check_answer(two_step, lambda d, p: page.get((d, p)), arithmetic=True).flagged
+
+    # A number that no single step produces is still flagged.
+    wrong = Answer("Operating income was 903,095 and margin 12.34% [D p.1].", (("D", 1),), (("D", 1),))
+    res = check_answer(wrong, lambda d, p: page.get((d, p)), arithmetic=True)
+    assert res.flagged and res.unsupported_values == [12.34]

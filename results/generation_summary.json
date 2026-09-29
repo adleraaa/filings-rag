@@ -1,0 +1,139 @@
+{
+  "overall": {
+    "n": 150,
+    "correct": 83,
+    "incorrect": 15,
+    "refusal": 52,
+    "accuracy": 0.5533
+  },
+  "by_question_type": {
+    "domain-relevant": {
+      "n": 50,
+      "correct": 18,
+      "incorrect": 7,
+      "refusal": 25,
+      "accuracy": 0.36
+    },
+    "metrics-generated": {
+      "n": 50,
+      "correct": 38,
+      "incorrect": 2,
+      "refusal": 10,
+      "accuracy": 0.76
+    },
+    "novel-generated": {
+      "n": 50,
+      "correct": 27,
+      "incorrect": 6,
+      "refusal": 17,
+      "accuracy": 0.54
+    }
+  },
+  "gold_page_in_context": {
+    "n": 92,
+    "correct": 70,
+    "incorrect": 9,
+    "refusal": 13,
+    "accuracy": 0.7609
+  },
+  "gold_page_not_in_context": {
+    "n": 58,
+    "correct": 13,
+    "incorrect": 6,
+    "refusal": 39,
+    "accuracy": 0.2241
+  },
+  "citation_check": {
+    "answered": 96,
+    "verbatim": {
+      "flagged": 35,
+      "flag_rate": 0.3646,
+      "flag_reasons": {
+        "unsupported_number": 35
+      },
+      "flagged_judge": {
+        "n": 35,
+        "correct": 32,
+        "incorrect": 3,
+        "refusal": 0,
+        "accuracy": 0.9143
+      },
+      "unflagged_judge": {
+        "n": 61,
+        "correct": 50,
+        "incorrect": 10,
+        "refusal": 1,
+        "accuracy": 0.8197
+      },
+      "auroc_flag_predicts_wrong": 0.412
+    },
+    "arithmetic": {
+      "flagged": 3,
+      "flag_rate": 0.0312,
+      "flag_reasons": {
+        "unsupported_number": 3
+      },
+      "flagged_judge": {
+        "n": 3,
+        "correct": 3,
+        "incorrect": 0,
+        "refusal": 0,
+        "accuracy": 1.0
+      },
+      "unflagged_judge": {
+        "n": 93,
+        "correct": 79,
+        "incorrect": 13,
+        "refusal": 1,
+        "accuracy": 0.8495
+      },
+      "auroc_flag_predicts_wrong": 0.4817
+    },
+    "auroc_low_similarity_predicts_wrong": 0.4268
+  },
+  "config": {
+    "method": "dense",
+    "scope": "doc",
+    "k_chunks": 8
+  },
+  "spend": {
+    "calls": 310,
+    "prompt_cache_hit_tokens": 23808,
+    "prompt_cache_miss_tokens": 510772,
+    "completion_tokens": 18155,
+    "cost_cny_upper_bound": 1.1677,
+    "cap_cny": 3.0,
+    "price_cny_per_million_tokens": {
+      "input_cache_hit": 0.04,
+      "input_cache_miss": 2.0,
+      "output": 8.0
+    },
+    "by_stage": {
+      "smoke_test": {
+        "calls": 2,
+        "prompt_tokens": 19,
+        "completion_tokens": 6
+      },
+      "pilot_answer": {
+        "calls": 4,
+        "prompt_tokens": 7371,
+        "completion_tokens": 161
+      },
+      "pilot_judge": {
+        "calls": 4,
+        "prompt_tokens": 1205,
+        "completion_tokens": 128
+      },
+      "answer": {
+        "calls": 150,
+        "prompt_tokens": 476457,
+        "completion_tokens": 11925
+      },
+      "judge": {
+        "calls": 150,
+        "prompt_tokens": 49528,
+        "completion_tokens": 5935
+      }
+    }
+  }
+}

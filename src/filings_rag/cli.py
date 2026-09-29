@@ -123,7 +123,7 @@ def best_config(results_dir: Path, scope: str) -> str:
 
 
 def cmd_eval_generation(args: argparse.Namespace) -> None:
-    from .eval_generation import add_similarity, run_generation, summarize, to_markdown
+    from .eval_generation import add_similarity, apply_checks, run_generation, summarize, to_markdown
     from .index import load_index
     from .llm import DeepSeekChat, SpendTracker
 
@@ -143,6 +143,7 @@ def cmd_eval_generation(args: argparse.Namespace) -> None:
         args.scope,
         args.k,
     )
+    apply_checks(rows, index)
     add_similarity(rows, index, index.retriever.embedder)
     summary = summarize(rows)
     summary["config"] = {"method": label, "scope": args.scope, "k_chunks": args.k}
@@ -168,10 +169,12 @@ def cmd_ask(args: argparse.Namespace) -> None:
     hits = index.retriever.search(args.question, method=method, k=args.k, docs=docs)
     tracker = SpendTracker.load(RESULTS / "spend.json", cap_cny=args.cap)
     ans = answer_question(DeepSeekChat(tracker, "ask"), args.question, hits)
-    check = check_answer(ans, index.page_text)
     print(ans.text)
     print(f"\ncontext pages: {', '.join(f'{d} p.{p}' for d, p in ans.context_pages)}")
-    print(f"citation check: {'FLAGGED ' + ', '.join(check.reasons) if check.flagged else 'ok'}")
+    for name, arithmetic in (("verbatim", False), ("arithmetic", True)):
+        check = check_answer(ans, index.page_text, arithmetic=arithmetic)
+        status = f"FLAGGED {', '.join(check.reasons)} {check.unsupported_values}" if check.flagged else "ok"
+        print(f"citation check ({name}): {status}")
 
 
 def cmd_serve_mcp(args: argparse.Namespace) -> None:
@@ -204,8 +207,7 @@ def export_explorer(results: Path) -> dict:
                 "answer": g.get("answer", ""),
                 "verdict": g.get("verdict", "not run"),
                 "judge_reason": g.get("judge_reason", ""),
-                "flagged": g.get("flagged", False),
-                "flag_reasons": g.get("flag_reasons", []),
+                "checks": g.get("checks", {}),
                 # Top-5 pages of every config for this question (runs are in question order).
                 "retrieval": {cfg: rows[i]["ranked_pages"][:5] for cfg, rows in runs.items()},
             }

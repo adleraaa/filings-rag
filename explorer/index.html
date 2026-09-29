@@ -64,8 +64,9 @@
     <input id="search" type="search" placeholder="Search question, company or answer">
     <select id="verdict"><option value="">All verdicts</option><option>correct</option>
       <option>incorrect</option><option>refusal</option></select>
-    <select id="flag"><option value="">Flagged or not</option><option value="1">Flagged</option>
-      <option value="0">Not flagged</option></select>
+    <select id="flag"><option value="">Any citation check</option>
+      <option value="verbatim:1">Flagged (verbatim)</option><option value="arithmetic:1">Flagged (arithmetic)</option>
+      <option value="arithmetic:0">Not flagged (arithmetic)</option></select>
     <select id="type"><option value="">All question types</option></select>
   </div>
   <div class="count" id="count"></div>
@@ -88,7 +89,9 @@ function renderQuestion(q) {
   const pageList = ps => ps.map(p => gold.has(key(p)) ? `<span class="hit">${esc(key(p))}</span>` : esc(key(p))).join(", ");
   const retrieval = Object.entries(q.retrieval).map(([cfg, ps]) =>
     `<div class="pages"><b>${esc(cfg)}</b>: ${pageList(ps)}</div>`).join("");
-  const flag = q.flagged ? `<span class="chip">flagged: ${esc(q.flag_reasons.join(", "))}</span>` : "";
+  const flag = Object.entries(q.checks || {}).filter(([, c]) => c.flagged)
+    .map(([name, c]) => `<span class="chip">${esc(name)} check: ${esc(c.reasons.join(", "))}` +
+      (c.unsupported_values.length ? ` (${esc(c.unsupported_values.join(", "))})` : "") + "</span>").join("");
   return `<div class="q">
     <h3>${esc(q.question)}</h3>
     <div class="meta"><span class="chip">${esc(q.qid)}</span><span class="chip">${esc(q.doc)}</span>
@@ -112,7 +115,8 @@ fetch("explorer.json").then(r => r.json()).then(data => {
     const [s, v, f, t] = inputs.map(i => i.value);
     const needle = s.trim().toLowerCase();
     const shown = data.questions.filter(q =>
-      (!v || q.verdict === v) && (!f || String(+q.flagged) === f) && (!t || q.question_type === t) &&
+      (!v || q.verdict === v) && (!t || q.question_type === t) &&
+      (!f || String(+!!(q.checks[f.split(":")[0]] || {}).flagged) === f.split(":")[1]) &&
       (!needle || (q.question + " " + q.doc + " " + q.answer).toLowerCase().includes(needle)));
     document.getElementById("count").textContent = `${shown.length} of ${data.questions.length} questions`;
     document.getElementById("list").innerHTML = shown.map(renderQuestion).join("");

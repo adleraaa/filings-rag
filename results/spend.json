@@ -1,0 +1,40 @@
+{
+  "calls": 310,
+  "prompt_cache_hit_tokens": 23808,
+  "prompt_cache_miss_tokens": 510772,
+  "completion_tokens": 18155,
+  "cost_cny_upper_bound": 1.1677,
+  "cap_cny": 3.0,
+  "price_cny_per_million_tokens": {
+    "input_cache_hit": 0.04,
+    "input_cache_miss": 2.0,
+    "output": 8.0
+  },
+  "by_stage": {
+    "smoke_test": {
+      "calls": 2,
+      "prompt_tokens": 19,
+      "completion_tokens": 6
+    },
+    "pilot_answer": {
+      "calls": 4,
+      "prompt_tokens": 7371,
+      "completion_tokens": 161
+    },
+    "pilot_judge": {
+      "calls": 4,
+      "prompt_tokens": 1205,
+      "completion_tokens": 128
+    },
+    "answer": {
+      "calls": 150,
+      "prompt_tokens": 476457,
+      "completion_tokens": 11925
+    },
+    "judge": {
+      "calls": 150,
+      "prompt_tokens": 49528,
+      "completion_tokens": 5935
+    }
+  }
+}
