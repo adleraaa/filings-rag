@@ -89,6 +89,14 @@ def cmd_eval_retrieval(args: argparse.Namespace) -> None:
     run_ablation(index.retriever, questions, args.out, args.methods, args.scopes, rerankers)
 
 
+def cmd_bootstrap(args: argparse.Namespace) -> None:
+    from .bootstrap import run
+
+    for row in run(args.out):
+        lo, hi = row["ci95"]
+        print(f"{row['config']:28s} vs {row['reference']}: {row['diff']:+.3f} [{lo:+.3f}, {hi:+.3f}]")
+
+
 def parse_method(label: str) -> tuple[str, str | None]:
     """ "hybrid_rerank[bge]" -> ("hybrid_rerank", "bge"); "bm25" -> ("bm25", None)."""
     from .index import DEFAULT_RERANKER, RERANKERS
@@ -237,6 +245,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--scopes", nargs="+", choices=("doc", "corpus"), default=["doc", "corpus"])
     s.add_argument("--rerankers", nargs="+", default=["minilm", "bge"], help="keys of index.RERANKERS")
     s.set_defaults(func=cmd_eval_retrieval)
+
+    s = sub.add_parser("bootstrap", help="paired bootstrap CIs of hit@5 vs dense retrieval")
+    s.add_argument("--out", type=Path, default=RESULTS)
+    s.set_defaults(func=cmd_bootstrap)
 
     s = sub.add_parser("eval-generation", help="answer + judge + citation check (DeepSeek, costs money)")
     s.add_argument("--index-dir", type=Path, default=INDEX)

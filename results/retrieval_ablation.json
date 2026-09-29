@@ -1,0 +1,257 @@
+{
+  "configs": [
+    {
+      "method": "bm25",
+      "scope": "doc",
+      "n": 150,
+      "hit@1": 0.1467,
+      "hit@3": 0.2533,
+      "hit@5": 0.3133,
+      "hit@10": 0.42,
+      "recall@1": 0.1433,
+      "recall@3": 0.2433,
+      "recall@5": 0.2967,
+      "recall@10": 0.4,
+      "mrr@10": 0.2184,
+      "doc_hit@5": 1.0,
+      "hit@5_by_question_type": {
+        "domain-relevant": 0.22,
+        "metrics-generated": 0.2,
+        "novel-generated": 0.52
+      },
+      "median_latency_ms": 0.9
+    },
+    {
+      "method": "dense",
+      "scope": "doc",
+      "n": 150,
+      "hit@1": 0.2867,
+      "hit@3": 0.4867,
+      "hit@5": 0.5867,
+      "hit@10": 0.6733,
+      "recall@1": 0.2567,
+      "recall@3": 0.45,
+      "recall@5": 0.54,
+      "recall@10": 0.6267,
+      "mrr@10": 0.4079,
+      "doc_hit@5": 1.0,
+      "hit@5_by_question_type": {
+        "domain-relevant": 0.32,
+        "metrics-generated": 0.82,
+        "novel-generated": 0.62
+      },
+      "median_latency_ms": 18.3
+    },
+    {
+      "method": "hybrid",
+      "scope": "doc",
+      "n": 150,
+      "hit@1": 0.2267,
+      "hit@3": 0.36,
+      "hit@5": 0.4467,
+      "hit@10": 0.64,
+      "recall@1": 0.22,
+      "recall@3": 0.3333,
+      "recall@5": 0.4033,
+      "recall@10": 0.5833,
+      "mrr@10": 0.3236,
+      "doc_hit@5": 1.0,
+      "hit@5_by_question_type": {
+        "domain-relevant": 0.24,
+        "metrics-generated": 0.58,
+        "novel-generated": 0.52
+      },
+      "median_latency_ms": 23.6
+    },
+    {
+      "method": "hybrid_rerank[minilm]",
+      "scope": "doc",
+      "n": 150,
+      "hit@1": 0.2333,
+      "hit@3": 0.4733,
+      "hit@5": 0.54,
+      "hit@10": 0.62,
+      "recall@1": 0.2033,
+      "recall@3": 0.4333,
+      "recall@5": 0.5,
+      "recall@10": 0.58,
+      "mrr@10": 0.3611,
+      "doc_hit@5": 1.0,
+      "hit@5_by_question_type": {
+        "domain-relevant": 0.4,
+        "metrics-generated": 0.64,
+        "novel-generated": 0.58
+      },
+      "median_latency_ms": 957.8
+    },
+    {
+      "method": "hybrid_rerank[bge]",
+      "scope": "doc",
+      "n": 150,
+      "hit@1": 0.1867,
+      "hit@3": 0.4067,
+      "hit@5": 0.5133,
+      "hit@10": 0.6333,
+      "recall@1": 0.18,
+      "recall@3": 0.3767,
+      "recall@5": 0.4833,
+      "recall@10": 0.5967,
+      "mrr@10": 0.322,
+      "doc_hit@5": 1.0,
+      "hit@5_by_question_type": {
+        "domain-relevant": 0.28,
+        "metrics-generated": 0.66,
+        "novel-generated": 0.6
+      },
+      "median_latency_ms": 5946.0
+    },
+    {
+      "method": "dense_rerank[minilm]",
+      "scope": "doc",
+      "n": 150,
+      "hit@1": 0.2533,
+      "hit@3": 0.5067,
+      "hit@5": 0.5733,
+      "hit@10": 0.68,
+      "recall@1": 0.2233,
+      "recall@3": 0.46,
+      "recall@5": 0.5233,
+      "recall@10": 0.6367,
+      "mrr@10": 0.3918,
+      "doc_hit@5": 1.0,
+      "hit@5_by_question_type": {
+        "domain-relevant": 0.44,
+        "metrics-generated": 0.68,
+        "novel-generated": 0.6
+      },
+      "median_latency_ms": 995.9
+    },
+    {
+      "method": "bm25",
+      "scope": "corpus",
+      "n": 150,
+      "hit@1": 0.0733,
+      "hit@3": 0.0933,
+      "hit@5": 0.1133,
+      "hit@10": 0.1533,
+      "recall@1": 0.0733,
+      "recall@3": 0.0933,
+      "recall@5": 0.11,
+      "recall@10": 0.15,
+      "mrr@10": 0.0912,
+      "doc_hit@5": 0.6067,
+      "hit@5_by_question_type": {
+        "domain-relevant": 0.12,
+        "metrics-generated": 0.0,
+        "novel-generated": 0.22
+      },
+      "median_latency_ms": 0.8
+    },
+    {
+      "method": "dense",
+      "scope": "corpus",
+      "n": 150,
+      "hit@1": 0.1533,
+      "hit@3": 0.2867,
+      "hit@5": 0.3733,
+      "hit@10": 0.4867,
+      "recall@1": 0.1333,
+      "recall@3": 0.2567,
+      "recall@5": 0.34,
+      "recall@10": 0.44,
+      "mrr@10": 0.2443,
+      "doc_hit@5": 0.8,
+      "hit@5_by_question_type": {
+        "domain-relevant": 0.2,
+        "metrics-generated": 0.52,
+        "novel-generated": 0.4
+      },
+      "median_latency_ms": 18.9
+    },
+    {
+      "method": "hybrid",
+      "scope": "corpus",
+      "n": 150,
+      "hit@1": 0.1067,
+      "hit@3": 0.1733,
+      "hit@5": 0.2267,
+      "hit@10": 0.3333,
+      "recall@1": 0.1067,
+      "recall@3": 0.1633,
+      "recall@5": 0.2167,
+      "recall@10": 0.3033,
+      "mrr@10": 0.1619,
+      "doc_hit@5": 0.7533,
+      "hit@5_by_question_type": {
+        "domain-relevant": 0.14,
+        "metrics-generated": 0.18,
+        "novel-generated": 0.36
+      },
+      "median_latency_ms": 17.5
+    },
+    {
+      "method": "hybrid_rerank[minilm]",
+      "scope": "corpus",
+      "n": 150,
+      "hit@1": 0.1067,
+      "hit@3": 0.24,
+      "hit@5": 0.3,
+      "hit@10": 0.4667,
+      "recall@1": 0.0967,
+      "recall@3": 0.22,
+      "recall@5": 0.28,
+      "recall@10": 0.4333,
+      "mrr@10": 0.1986,
+      "doc_hit@5": 0.78,
+      "hit@5_by_question_type": {
+        "domain-relevant": 0.16,
+        "metrics-generated": 0.36,
+        "novel-generated": 0.38
+      },
+      "median_latency_ms": 995.0
+    },
+    {
+      "method": "hybrid_rerank[bge]",
+      "scope": "corpus",
+      "n": 150,
+      "hit@1": 0.1267,
+      "hit@3": 0.2533,
+      "hit@5": 0.3467,
+      "hit@10": 0.46,
+      "recall@1": 0.12,
+      "recall@3": 0.2333,
+      "recall@5": 0.33,
+      "recall@10": 0.4267,
+      "mrr@10": 0.2214,
+      "doc_hit@5": 0.8467,
+      "hit@5_by_question_type": {
+        "domain-relevant": 0.14,
+        "metrics-generated": 0.5,
+        "novel-generated": 0.4
+      },
+      "median_latency_ms": 6284.7
+    },
+    {
+      "method": "dense_rerank[minilm]",
+      "scope": "corpus",
+      "n": 150,
+      "hit@1": 0.12,
+      "hit@3": 0.2933,
+      "hit@5": 0.3667,
+      "hit@10": 0.5133,
+      "recall@1": 0.1067,
+      "recall@3": 0.25,
+      "recall@5": 0.3233,
+      "recall@10": 0.47,
+      "mrr@10": 0.2285,
+      "doc_hit@5": 0.8733,
+      "hit@5_by_question_type": {
+        "domain-relevant": 0.2,
+        "metrics-generated": 0.46,
+        "novel-generated": 0.44
+      },
+      "median_latency_ms": 1030.4
+    }
+  ],
+  "chunk_depth": 30
+}

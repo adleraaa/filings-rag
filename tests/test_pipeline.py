@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import json
 
+import numpy as np
 import pytest
 
 from filings_rag.cli import best_config, build_parser, export_explorer, parse_method
@@ -178,3 +179,22 @@ def test_ablation_subset_rerun_merges_into_existing_results(index, tmp_path):
     ]
     runs = json.loads((tmp_path / "retrieval_per_question.json").read_text())
     assert set(runs) == {"doc/bm25", "doc/dense", "doc/dense_rerank", "corpus/dense_rerank"}
+
+
+def test_paired_bootstrap():
+    from filings_rag.bootstrap import compare_to_reference, paired_bootstrap
+
+    a = np.array([1.0] * 50 + [0.0] * 50)
+    mean, lo, hi = paired_bootstrap(a, a)
+    assert mean == lo == hi == 0.0
+    better = np.ones(100)
+    mean, lo, hi = paired_bootstrap(better, a)
+    assert mean == 0.5 and 0.35 < lo < 0.5 < hi < 0.65
+    runs = {
+        "doc/dense": [{"hit@5": x} for x in a],
+        "doc/bm25": [{"hit@5": 0.0} for _ in a],
+        "corpus/dense": [{"hit@5": 0.0} for _ in a],
+    }
+    rows = compare_to_reference(runs, "doc/dense")
+    assert [r["config"] for r in rows] == ["doc/bm25"]  # other scopes are not compared
+    assert rows[0]["diff"] == -0.5 and rows[0]["significant"]

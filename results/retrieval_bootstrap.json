@@ -1,0 +1,112 @@
+[
+  {
+    "config": "doc/bm25",
+    "reference": "doc/dense",
+    "metric": "hit@5",
+    "diff": -0.2733,
+    "ci95": [
+      -0.36,
+      -0.18
+    ],
+    "significant": true
+  },
+  {
+    "config": "doc/hybrid",
+    "reference": "doc/dense",
+    "metric": "hit@5",
+    "diff": -0.14,
+    "ci95": [
+      -0.2067,
+      -0.0733
+    ],
+    "significant": true
+  },
+  {
+    "config": "doc/hybrid_rerank[minilm]",
+    "reference": "doc/dense",
+    "metric": "hit@5",
+    "diff": -0.0467,
+    "ci95": [
+      -0.1202,
+      0.0267
+    ],
+    "significant": false
+  },
+  {
+    "config": "doc/hybrid_rerank[bge]",
+    "reference": "doc/dense",
+    "metric": "hit@5",
+    "diff": -0.0733,
+    "ci95": [
+      -0.1533,
+      0.0067
+    ],
+    "significant": false
+  },
+  {
+    "config": "doc/dense_rerank[minilm]",
+    "reference": "doc/dense",
+    "metric": "hit@5",
+    "diff": -0.0133,
+    "ci95": [
+      -0.0867,
+      0.0533
+    ],
+    "significant": false
+  },
+  {
+    "config": "corpus/bm25",
+    "reference": "corpus/dense",
+    "metric": "hit@5",
+    "diff": -0.26,
+    "ci95": [
+      -0.3333,
+      -0.1867
+    ],
+    "significant": true
+  },
+  {
+    "config": "corpus/hybrid",
+    "reference": "corpus/dense",
+    "metric": "hit@5",
+    "diff": -0.1467,
+    "ci95": [
+      -0.2133,
+      -0.0733
+    ],
+    "significant": true
+  },
+  {
+    "config": "corpus/hybrid_rerank[minilm]",
+    "reference": "corpus/dense",
+    "metric": "hit@5",
+    "diff": -0.0733,
+    "ci95": [
+      -0.1333,
+      -0.0133
+    ],
+    "significant": true
+  },
+  {
+    "config": "corpus/hybrid_rerank[bge]",
+    "reference": "corpus/dense",
+    "metric": "hit@5",
+    "diff": -0.0267,
+    "ci95": [
+      -0.0933,
+      0.04
+    ],
+    "significant": false
+  },
+  {
+    "config": "corpus/dense_rerank[minilm]",
+    "reference": "corpus/dense",
+    "metric": "hit@5",
+    "diff": -0.0067,
+    "ci95": [
+      -0.0667,
+      0.0533
+    ],
+    "significant": false
+  }
+]
