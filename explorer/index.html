@@ -58,7 +58,11 @@
   <p class="sub">FinanceBench open-source sample (150 questions, CC BY-NC 4.0, Patronus AI).
     Retrieval ranks, DeepSeek answers, LLM-judge verdicts and citation-check flags produced by the
     scripts in <a href="https://github.com/adleraaa/filings-rag">adleraaa/filings-rag</a>.
-    Verdicts come from an LLM judge, not from human review.</p>
+    Verdicts come from an LLM judge, not from human review.
+    Questions and gold answers are FinanceBench content under CC BY-NC 4.0 (non-commercial use only,
+    not covered by the repo's MIT licence); evidence page numbers were converted from 0-based to 1-based.
+    See <a href="https://github.com/adleraaa/filings-rag/blob/main/results/NOTICE">results/NOTICE</a>.
+    The <code>arithmetic_loose</code> check is a deliberately permissive earlier version kept for comparison.</p>
 
   <div class="scroll"><table class="sum" id="ablation"></table></div>
 
@@ -97,7 +101,7 @@ function renderQuestion(q) {
   return `<div class="q">
     <h3>${esc(q.question)}</h3>
     <div class="meta"><span class="chip">${esc(q.qid)}</span><span class="chip">${esc(q.doc)}</span>
-      <span class="chip">${esc(q.question_type)}</span>
+      <span class="chip">${esc(q.question_type)}</span>${q.status ? `<span class="chip">answer: ${esc(q.status)}</span>` : ""}
       <span class="chip ${q.verdict}">judge: ${esc(q.verdict)}</span>${flag}</div>
     <div class="label">Model answer</div><div class="ans">${esc(q.answer)}</div>
     <div class="label">Gold answer</div><div class="ans">${esc(q.gold_answer)}</div>

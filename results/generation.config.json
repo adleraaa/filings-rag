@@ -1,0 +1,7 @@
+{
+  "method": "dense",
+  "scope": "doc",
+  "k_chunks": 8,
+  "answer_model": "deepseek-v4-flash",
+  "judge_model": "deepseek-v4-flash"
+}
