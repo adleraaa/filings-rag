@@ -80,11 +80,32 @@ def evidence_page_check(qfile: Path, page_text: dict) -> dict:
 
 def cmd_eval_retrieval(args: argparse.Namespace) -> None:
     from .eval_retrieval import run_ablation
-    from .index import load_index
+    from .index import RERANKERS, load_index
+    from .retrieval import CrossEncoderReranker
 
-    index = load_index(args.index_dir)
+    index = load_index(args.index_dir, reranker=None)
+    rerankers = {name: CrossEncoderReranker(model) for name, model in RERANKERS.items()}
     questions = load_questions(args.questions)
-    run_ablation(index.retriever, questions, args.out)
+    run_ablation(index.retriever, questions, args.out, rerankers=rerankers)
+
+
+def parse_method(label: str) -> tuple[str, str | None]:
+    """ "hybrid_rerank[bge]" -> ("hybrid_rerank", "bge"); "bm25" -> ("bm25", None)."""
+    from .index import DEFAULT_RERANKER, RERANKERS
+
+    m = re.fullmatch(r"(\w+)(?:\[(\w+)\])?", label)
+    if not m or m.group(1) not in METHODS or (m.group(2) and m.group(2) not in RERANKERS):
+        raise argparse.ArgumentTypeError(f"unknown method {label!r}")
+    method, reranker = m.groups()
+    if method == "hybrid_rerank":
+        return method, reranker or DEFAULT_RERANKER
+    return method, None
+
+
+def method_label(label: str) -> str:
+    """argparse type: validate a method label and keep it as a string."""
+    parse_method(label)
+    return label
 
 
 def best_config(results_dir: Path, scope: str) -> str:
@@ -98,9 +119,10 @@ def cmd_eval_generation(args: argparse.Namespace) -> None:
     from .index import load_index
     from .llm import DeepSeekChat, SpendTracker
 
-    method = args.method or best_config(args.out, args.scope)
-    print(f"generation with method={method} scope={args.scope} k={args.k}")
-    index = load_index(args.index_dir)
+    label = args.method or best_config(args.out, args.scope)
+    method, reranker = parse_method(label)
+    print(f"generation with method={label} scope={args.scope} k={args.k}")
+    index = load_index(args.index_dir, reranker=reranker)
     tracker = SpendTracker.load(args.out / "spend.json", cap_cny=args.cap)
     questions = load_questions(args.questions)[: args.limit]
     rows = run_generation(
@@ -115,7 +137,7 @@ def cmd_eval_generation(args: argparse.Namespace) -> None:
     )
     add_similarity(rows, index, index.retriever.embedder)
     summary = summarize(rows)
-    summary["config"] = {"method": method, "scope": args.scope, "k_chunks": args.k}
+    summary["config"] = {"method": label, "scope": args.scope, "k_chunks": args.k}
     summary["spend"] = tracker.to_dict()
     (args.out / "generation_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     (args.out / "generation_summary.md").write_text(to_markdown(summary), encoding="utf-8")
@@ -132,9 +154,10 @@ def cmd_ask(args: argparse.Namespace) -> None:
     from .llm import DeepSeekChat, SpendTracker
     from .mcp_server import docs_for_company
 
-    index = load_index(args.index_dir)
+    method, reranker = parse_method(args.method)
+    index = load_index(args.index_dir, reranker=reranker)
     docs = [args.doc] if args.doc else (docs_for_company(index, args.company) if args.company else None)
-    hits = index.retriever.search(args.question, method=args.method, k=args.k, docs=docs)
+    hits = index.retriever.search(args.question, method=method, k=args.k, docs=docs)
     tracker = SpendTracker.load(RESULTS / "spend.json", cap_cny=args.cap)
     ans = answer_question(DeepSeekChat(tracker, "ask"), args.question, hits)
     check = check_answer(ans, index.page_text)
@@ -147,7 +170,8 @@ def cmd_serve_mcp(args: argparse.Namespace) -> None:
     from .index import load_index
     from .mcp_server import build_server
 
-    build_server(load_index(args.index_dir)).run()
+    method, reranker = parse_method(args.method)
+    build_server(load_index(args.index_dir, reranker=reranker), method=method).run()
 
 
 def export_explorer(results: Path) -> dict:
@@ -215,7 +239,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--index-dir", type=Path, default=INDEX)
     s.add_argument("--questions", type=Path, default=QUESTIONS)
     s.add_argument("--out", type=Path, default=RESULTS)
-    s.add_argument("--method", choices=METHODS, default=None, help="default: best doc-scoped hit@5")
+    s.add_argument("--method", type=method_label, default=None, help="default: best doc-scoped hit@5")
     s.add_argument("--scope", choices=("doc", "corpus"), default="doc")
     s.add_argument("--k", type=int, default=5, help="chunks passed to the model")
     s.add_argument("--limit", type=int, default=None)
@@ -226,7 +250,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("question")
     s.add_argument("--company", default=None)
     s.add_argument("--doc", default=None, help="restrict to one filing, e.g. 3M_2018_10K")
-    s.add_argument("--method", choices=METHODS, default="hybrid_rerank")
+    s.add_argument("--method", type=method_label, default="hybrid_rerank[minilm]")
     s.add_argument("--k", type=int, default=5)
     s.add_argument("--index-dir", type=Path, default=INDEX)
     s.add_argument("--cap", type=float, default=3.0)
@@ -234,6 +258,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("serve-mcp", help="run the MCP server over stdio")
     s.add_argument("--index-dir", type=Path, default=INDEX)
+    s.add_argument("--method", type=method_label, default="hybrid_rerank[minilm]")
     s.set_defaults(func=cmd_serve_mcp)
 
     s = sub.add_parser("export-explorer", help="write explorer/explorer.json for the static site")

@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .data import Question
 from .metrics import hit_at_k, pages_in_order, recall_at_k, reciprocal_rank
-from .retrieval import METHODS, Retriever
+from .retrieval import METHODS, Reranker, Retriever
 
 KS = (1, 3, 5, 10)
 CHUNK_DEPTH = 30  # chunks fetched per query; equals the rerank pool so all methods see the same depth
@@ -62,14 +62,26 @@ def run_ablation(
     out_dir: Path,
     methods: Sequence[str] = METHODS,
     scopes: Sequence[str] = ("doc", "corpus"),
+    rerankers: dict[str, Reranker] | None = None,
 ) -> list[dict]:
+    """Run every (scope, method) pair. With `rerankers`, hybrid_rerank runs once
+    per named reranker and is labelled e.g. "hybrid_rerank[minilm]"."""
+    variants: list[tuple[str, str, Reranker | None]] = []
+    for method in methods:
+        if method == "hybrid_rerank" and rerankers:
+            variants += [(method, f"{method}[{name}]", r) for name, r in rerankers.items()]
+        else:
+            variants.append((method, method, retriever.reranker))
+
     summaries, runs = [], {}
     for scope in scopes:
-        for method in methods:
+        for method, label, reranker in variants:
+            retriever.reranker = reranker
             summary, per_q = run_config(retriever, questions, method, scope)
-            print(f"{scope:6s} {method:14s} hit@5={summary['hit@5']:.3f} mrr={summary['mrr@10']:.3f}")
+            summary["method"] = label
+            print(f"{scope:6s} {label:22s} hit@5={summary['hit@5']:.3f} mrr={summary['mrr@10']:.3f}")
             summaries.append(summary)
-            runs[f"{scope}/{method}"] = per_q
+            runs[f"{scope}/{label}"] = per_q
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "retrieval_ablation.json").write_text(
         json.dumps({"configs": summaries, "chunk_depth": CHUNK_DEPTH}, indent=2), encoding="utf-8"

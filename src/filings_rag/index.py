@@ -12,7 +12,11 @@ from .ingest import Chunk, Page, chunk_pages, extract_pages, read_chunks, read_p
 from .retrieval import CrossEncoderReranker, Embedder, Retriever, SentenceTransformerEmbedder
 
 DEFAULT_EMBED_MODEL = "BAAI/bge-small-en-v1.5"
-DEFAULT_RERANK_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+RERANKERS = {
+    "minilm": "cross-encoder/ms-marco-MiniLM-L-6-v2",  # 22M params, trained on web search
+    "bge": "BAAI/bge-reranker-base",  # 278M params, multilingual, slower on CPU
+}
+DEFAULT_RERANKER = "minilm"
 
 
 @dataclass
@@ -67,22 +71,15 @@ def write_index(
     (out_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
 
-def load_index(
-    index_dir: Path,
-    embedder: Embedder | None = None,
-    reranker=None,
-    load_models: bool = True,
-) -> Index:
-    """Load an index. With load_models=True, missing embedder/reranker are
-    created from the model names recorded at build time."""
+def load_index(index_dir: Path, reranker: str | None = DEFAULT_RERANKER) -> Index:
+    """Load pages, chunks and embeddings, plus the embedding model recorded at
+    build time and the named reranker (a key of RERANKERS, or None)."""
     pages = read_pages(index_dir / "pages.jsonl")
     chunks = read_chunks(index_dir / "chunks.jsonl")
     meta = json.loads((index_dir / "meta.json").read_text(encoding="utf-8"))
     emb_path = index_dir / "embeddings.npy"
     embeddings = np.load(emb_path) if emb_path.exists() else None
-    if load_models and embeddings is not None and embedder is None:
-        embedder = SentenceTransformerEmbedder(meta["embed_model"])
-    if load_models and reranker is None:
-        reranker = CrossEncoderReranker(DEFAULT_RERANK_MODEL)
+    embedder = SentenceTransformerEmbedder(meta["embed_model"]) if embeddings is not None else None
+    reranker = CrossEncoderReranker(RERANKERS[reranker]) if reranker else None
     retriever = Retriever(chunks, embeddings, embedder, reranker)
     return Index({(p.doc, p.page): p for p in pages}, retriever)

@@ -1,9 +1,10 @@
+import argparse
 import asyncio
 import json
 
 import pytest
 
-from filings_rag.cli import best_config, build_parser, export_explorer
+from filings_rag.cli import best_config, build_parser, export_explorer, parse_method
 from filings_rag.data import Question
 from filings_rag.eval_generation import add_similarity, auroc, run_generation, summarize, to_markdown
 from filings_rag.eval_retrieval import run_ablation
@@ -11,7 +12,13 @@ from filings_rag.llm import BudgetExceeded, SpendTracker
 from filings_rag.mcp_server import build_server, docs_for_company
 from filings_rag.retrieval import METHODS
 
-from .conftest import FakeLLM, HashEmbedder
+from .conftest import FakeLLM, HashEmbedder, OverlapReranker
+
+
+class ReverseReranker:
+    def score(self, query, texts):
+        return -OverlapReranker().score(query, texts)
+
 
 QUESTIONS = [
     Question(
@@ -136,6 +143,23 @@ def test_company_matching(index):
 
 def test_cli_parser():
     args = build_parser().parse_args(["ask", "What was capex?", "--company", "3M", "--k", "3"])
-    assert args.company == "3M" and args.k == 3 and args.method == "hybrid_rerank"
+    assert args.company == "3M" and args.k == 3 and args.method == "hybrid_rerank[minilm]"
     with pytest.raises(SystemExit):
         build_parser().parse_args(["eval-generation", "--method", "magic"])
+
+
+def test_parse_method_labels():
+    assert parse_method("bm25") == ("bm25", None)
+    assert parse_method("hybrid_rerank") == ("hybrid_rerank", "minilm")
+    assert parse_method("hybrid_rerank[bge]") == ("hybrid_rerank", "bge")
+    for bad in ("magic", "hybrid_rerank[gpt]", "bm25 "):
+        with pytest.raises(argparse.ArgumentTypeError):
+            parse_method(bad)
+
+
+def test_ablation_runs_each_named_reranker(index, tmp_path):
+    rerankers = {"overlap": OverlapReranker(), "reverse": ReverseReranker()}
+    summaries = run_ablation(index.retriever, QUESTIONS, tmp_path, ["hybrid_rerank"], ["doc"], rerankers)
+    assert [s["method"] for s in summaries] == ["hybrid_rerank[overlap]", "hybrid_rerank[reverse]"]
+    # The rerankers disagree, so the two runs must not be identical.
+    assert summaries[0]["mrr@10"] != summaries[1]["mrr@10"]
