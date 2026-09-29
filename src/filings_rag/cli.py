@@ -1,0 +1,199 @@
+"""Command-line entry point: filings-rag <command> [options]."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import statistics
+import sys
+from pathlib import Path
+
+from .data import download, load_questions
+from .retrieval import METHODS
+
+DATA = Path("data")
+QUESTIONS = DATA / "financebench_open_source.jsonl"
+INDEX = DATA / "index"
+RESULTS = Path("results")
+
+
+def cmd_download(args: argparse.Namespace) -> None:
+    paths = download(args.data_dir)
+    print(f"{len(paths)} PDFs in {args.data_dir / 'pdfs'}")
+
+
+def cmd_ingest(args: argparse.Namespace) -> None:
+    from .index import DEFAULT_EMBED_MODEL, build_index
+    from .retrieval import SentenceTransformerEmbedder
+
+    embedder = SentenceTransformerEmbedder(DEFAULT_EMBED_MODEL)
+    pages, chunks = build_index(args.pdf_dir, args.index_dir, embedder, args.chunk_words, args.overlap)
+    print(f"{len(pages)} pages -> {len(chunks)} chunks in {args.index_dir}")
+
+    # Stats that tell us whether the chunking choice is sane for the embedder.
+    lengths = [len(embedder.model.tokenizer(c.text)["input_ids"]) for c in chunks]
+    stats = {
+        "documents": len({p.doc for p in pages}),
+        "pages": len(pages),
+        "empty_pages": sum(not p.text for p in pages),
+        "chunks": len(chunks),
+        "chunk_words": args.chunk_words,
+        "overlap_words": args.overlap,
+        "chunk_tokens_median": statistics.median(lengths),
+        "chunk_tokens_p90": sorted(lengths)[int(0.9 * len(lengths))],
+        "chunks_over_512_tokens": round(sum(n > 512 for n in lengths) / len(lengths), 4),
+        "evidence_page_check": evidence_page_check(args.questions, {(p.doc, p.page): p.text for p in pages}),
+    }
+    RESULTS.mkdir(exist_ok=True)
+    (RESULTS / "ingest_stats.json").write_text(json.dumps(stats, indent=2), encoding="utf-8")
+    print(json.dumps(stats, indent=2))
+
+
+def evidence_page_check(qfile: Path, page_text: dict) -> dict:
+    """How often FinanceBench's evidence snippet is really on the labelled page.
+
+    Guards against an off-by-one in page numbering, which would silently turn
+    every retrieval metric into noise.
+    """
+
+    def norm(s: str) -> str:
+        return re.sub(r"\s+", " ", s).strip().lower()
+
+    found = total = 0
+    for line in qfile.open(encoding="utf-8"):
+        for ev in json.loads(line)["evidence"]:
+            snippet = norm(ev["evidence_text_full_page"])[50:150]
+            total += 1
+            found += snippet in norm(page_text.get((ev["doc_name"], ev["evidence_page_num"] + 1), ""))
+    return {"evidence_items": total, "snippet_found_on_labelled_page": found}
+
+
+def cmd_eval_retrieval(args: argparse.Namespace) -> None:
+    from .eval_retrieval import run_ablation
+    from .index import load_index
+
+    index = load_index(args.index_dir)
+    questions = load_questions(args.questions)
+    run_ablation(index.retriever, questions, args.out)
+
+
+def best_config(results_dir: Path, scope: str) -> str:
+    configs = json.loads((results_dir / "retrieval_ablation.json").read_text())["configs"]
+    candidates = [c for c in configs if c["scope"] == scope]
+    return max(candidates, key=lambda c: (c["hit@5"], c["mrr@10"]))["method"]
+
+
+def cmd_eval_generation(args: argparse.Namespace) -> None:
+    from .eval_generation import add_similarity, run_generation, summarize, to_markdown
+    from .index import load_index
+    from .llm import DeepSeekChat, SpendTracker
+
+    method = args.method or best_config(args.out, args.scope)
+    print(f"generation with method={method} scope={args.scope} k={args.k}")
+    index = load_index(args.index_dir)
+    tracker = SpendTracker.load(args.out / "spend.json", cap_cny=args.cap)
+    questions = load_questions(args.questions)[: args.limit]
+    rows = run_generation(
+        index,
+        questions,
+        DeepSeekChat(tracker, "answer"),
+        DeepSeekChat(tracker, "judge"),
+        args.out / "generation.jsonl",
+        method,
+        args.scope,
+        args.k,
+    )
+    add_similarity(rows, index, index.retriever.embedder)
+    summary = summarize(rows)
+    summary["config"] = {"method": method, "scope": args.scope, "k_chunks": args.k}
+    summary["spend"] = tracker.to_dict()
+    (args.out / "generation_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    (args.out / "generation_summary.md").write_text(to_markdown(summary), encoding="utf-8")
+    (args.out / "generation_with_similarity.jsonl").write_text(
+        "".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8"
+    )
+    print(to_markdown(summary))
+
+
+def cmd_ask(args: argparse.Namespace) -> None:
+    from .citation_check import check_answer
+    from .generate import answer_question
+    from .index import load_index
+    from .llm import DeepSeekChat, SpendTracker
+    from .mcp_server import docs_for_company
+
+    index = load_index(args.index_dir)
+    docs = [args.doc] if args.doc else (docs_for_company(index, args.company) if args.company else None)
+    hits = index.retriever.search(args.question, method=args.method, k=args.k, docs=docs)
+    tracker = SpendTracker.load(RESULTS / "spend.json", cap_cny=args.cap)
+    ans = answer_question(DeepSeekChat(tracker, "ask"), args.question, hits)
+    check = check_answer(ans, index.page_text)
+    print(ans.text)
+    print(f"\ncontext pages: {', '.join(f'{d} p.{p}' for d, p in ans.context_pages)}")
+    print(f"citation check: {'FLAGGED ' + ', '.join(check.reasons) if check.flagged else 'ok'}")
+
+
+def cmd_serve_mcp(args: argparse.Namespace) -> None:
+    from .index import load_index
+    from .mcp_server import build_server
+
+    build_server(load_index(args.index_dir)).run()
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="filings-rag", description=__doc__)
+    sub = p.add_subparsers(dest="command", required=True)
+
+    s = sub.add_parser("download", help="fetch FinanceBench questions and the PDFs they reference")
+    s.add_argument("--data-dir", type=Path, default=DATA)
+    s.set_defaults(func=cmd_download)
+
+    s = sub.add_parser("ingest", help="extract pages, chunk, embed")
+    s.add_argument("--pdf-dir", type=Path, default=DATA / "pdfs")
+    s.add_argument("--index-dir", type=Path, default=INDEX)
+    s.add_argument("--questions", type=Path, default=QUESTIONS)
+    s.add_argument("--chunk-words", type=int, default=250)
+    s.add_argument("--overlap", type=int, default=50)
+    s.set_defaults(func=cmd_ingest)
+
+    s = sub.add_parser("eval-retrieval", help="retrieval ablation (no LLM calls)")
+    s.add_argument("--index-dir", type=Path, default=INDEX)
+    s.add_argument("--questions", type=Path, default=QUESTIONS)
+    s.add_argument("--out", type=Path, default=RESULTS)
+    s.set_defaults(func=cmd_eval_retrieval)
+
+    s = sub.add_parser("eval-generation", help="answer + judge + citation check (DeepSeek, costs money)")
+    s.add_argument("--index-dir", type=Path, default=INDEX)
+    s.add_argument("--questions", type=Path, default=QUESTIONS)
+    s.add_argument("--out", type=Path, default=RESULTS)
+    s.add_argument("--method", choices=METHODS, default=None, help="default: best doc-scoped hit@5")
+    s.add_argument("--scope", choices=("doc", "corpus"), default="doc")
+    s.add_argument("--k", type=int, default=5, help="chunks passed to the model")
+    s.add_argument("--limit", type=int, default=None)
+    s.add_argument("--cap", type=float, default=3.0, help="hard spend cap in CNY across runs")
+    s.set_defaults(func=cmd_eval_generation)
+
+    s = sub.add_parser("ask", help="answer one question with citations")
+    s.add_argument("question")
+    s.add_argument("--company", default=None)
+    s.add_argument("--doc", default=None, help="restrict to one filing, e.g. 3M_2018_10K")
+    s.add_argument("--method", choices=METHODS, default="hybrid_rerank")
+    s.add_argument("--k", type=int, default=5)
+    s.add_argument("--index-dir", type=Path, default=INDEX)
+    s.add_argument("--cap", type=float, default=3.0)
+    s.set_defaults(func=cmd_ask)
+
+    s = sub.add_parser("serve-mcp", help="run the MCP server over stdio")
+    s.add_argument("--index-dir", type=Path, default=INDEX)
+    s.set_defaults(func=cmd_serve_mcp)
+    return p
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = build_parser().parse_args(argv)
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
