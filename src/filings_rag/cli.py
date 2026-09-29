@@ -25,14 +25,19 @@ def cmd_download(args: argparse.Namespace) -> None:
 
 def cmd_ingest(args: argparse.Namespace) -> None:
     from .index import DEFAULT_EMBED_MODEL, build_index
+    from .ingest import read_chunks, read_pages
     from .retrieval import SentenceTransformerEmbedder
 
     embedder = SentenceTransformerEmbedder(DEFAULT_EMBED_MODEL)
-    pages, chunks = build_index(args.pdf_dir, args.index_dir, embedder, args.chunk_words, args.overlap)
+    if args.stats_only:
+        pages = read_pages(args.index_dir / "pages.jsonl")
+        chunks = read_chunks(args.index_dir / "chunks.jsonl")
+    else:
+        pages, chunks = build_index(args.pdf_dir, args.index_dir, embedder, args.chunk_words, args.overlap)
     print(f"{len(pages)} pages -> {len(chunks)} chunks in {args.index_dir}")
 
     # Stats that tell us whether the chunking choice is sane for the embedder.
-    lengths = [len(embedder.model.tokenizer(c.text)["input_ids"]) for c in chunks]
+    lengths = [len(ids) for ids in embedder.model.tokenizer([c.text for c in chunks])["input_ids"]]
     stats = {
         "documents": len({p.doc for p in pages}),
         "pages": len(pages),
@@ -51,22 +56,26 @@ def cmd_ingest(args: argparse.Namespace) -> None:
 
 
 def evidence_page_check(qfile: Path, page_text: dict) -> dict:
-    """How often FinanceBench's evidence snippet is really on the labelled page.
+    """Where FinanceBench's evidence snippet is found relative to the labelled page.
 
     Guards against an off-by-one in page numbering, which would silently turn
-    every retrieval metric into noise.
+    every retrieval metric into noise: the labelled page (0-based index + 1)
+    should win by a wide margin over its neighbours.
     """
 
     def norm(s: str) -> str:
         return re.sub(r"\s+", " ", s).strip().lower()
 
-    found = total = 0
+    counts = {"labelled_page": 0, "page_before": 0, "page_after": 0}
+    total = 0
     for line in qfile.open(encoding="utf-8"):
         for ev in json.loads(line)["evidence"]:
             snippet = norm(ev["evidence_text_full_page"])[50:150]
+            page = ev["evidence_page_num"] + 1
             total += 1
-            found += snippet in norm(page_text.get((ev["doc_name"], ev["evidence_page_num"] + 1), ""))
-    return {"evidence_items": total, "snippet_found_on_labelled_page": found}
+            for name, p in (("labelled_page", page), ("page_before", page - 1), ("page_after", page + 1)):
+                counts[name] += snippet in norm(page_text.get((ev["doc_name"], p), ""))
+    return {"evidence_items": total, "snippet_found_on": counts}
 
 
 def cmd_eval_retrieval(args: argparse.Namespace) -> None:
@@ -193,6 +202,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--questions", type=Path, default=QUESTIONS)
     s.add_argument("--chunk-words", type=int, default=250)
     s.add_argument("--overlap", type=int, default=50)
+    s.add_argument("--stats-only", action="store_true", help="recompute ingest_stats.json only")
     s.set_defaults(func=cmd_ingest)
 
     s = sub.add_parser("eval-retrieval", help="retrieval ablation (no LLM calls)")

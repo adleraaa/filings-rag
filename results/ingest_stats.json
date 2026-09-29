@@ -1,0 +1,19 @@
+{
+  "documents": 84,
+  "pages": 12013,
+  "empty_pages": 65,
+  "chunks": 33998,
+  "chunk_words": 250,
+  "overlap_words": 50,
+  "chunk_tokens_median": 308.0,
+  "chunk_tokens_p90": 376,
+  "chunks_over_512_tokens": 0.0142,
+  "evidence_page_check": {
+    "evidence_items": 189,
+    "snippet_found_on": {
+      "labelled_page": 157,
+      "page_before": 2,
+      "page_after": 5
+    }
+  }
+}
