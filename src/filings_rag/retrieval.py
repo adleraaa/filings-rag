@@ -18,7 +18,8 @@ import numpy as np
 
 from .ingest import Chunk
 
-METHODS = ("bm25", "dense", "hybrid", "hybrid_rerank")
+METHODS = ("bm25", "dense", "hybrid", "hybrid_rerank", "dense_rerank")
+RERANK_METHODS = ("hybrid_rerank", "dense_rerank")
 
 _STOPWORDS = frozenset(
     "a an and are as at be by for from has have in is it its of on or that the "
@@ -180,19 +181,19 @@ class Retriever:
         if method == "bm25":
             s = self.bm25.scores(query)
             return [Hit(self.chunks[i], float(s[i])) for i in top_n(s, mask, k)]
-        if method == "dense":
+        if method in ("dense", "dense_rerank"):
             s = self._dense_scores(query)
-            return [Hit(self.chunks[i], float(s[i])) for i in top_n(s, mask, k)]
-
-        lexical = top_n(self.bm25.scores(query), mask, self.candidates)
-        semantic = top_n(self._dense_scores(query), mask, self.candidates)
-        fused = rrf([lexical, semantic])
-        if method == "hybrid":
-            return [Hit(self.chunks[i], s) for i, s in fused[:k]]
+            ranked = [(i, float(s[i])) for i in top_n(s, mask, max(k, self.rerank_depth))]
+        else:
+            lexical = top_n(self.bm25.scores(query), mask, self.candidates)
+            semantic = top_n(self._dense_scores(query), mask, self.candidates)
+            ranked = rrf([lexical, semantic])
+        if method in ("dense", "hybrid"):
+            return [Hit(self.chunks[i], s) for i, s in ranked[:k]]
 
         if self.reranker is None:
-            raise RuntimeError("hybrid_rerank needs a reranker")
-        pool = [i for i, _ in fused[: self.rerank_depth]]
+            raise RuntimeError(f"{method} needs a reranker")
+        pool = [i for i, _ in ranked[: self.rerank_depth]]
         s = self.reranker.score(query, [self.chunks[i].text for i in pool])
         order = np.argsort(-s, kind="stable")[:k]
         return [Hit(self.chunks[pool[j]], float(s[j])) for j in order]

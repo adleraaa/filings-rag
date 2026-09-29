@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .data import Question
 from .metrics import hit_at_k, pages_in_order, recall_at_k, reciprocal_rank
-from .retrieval import METHODS, Reranker, Retriever
+from .retrieval import METHODS, RERANK_METHODS, Reranker, Retriever
 
 KS = (1, 3, 5, 10)
 CHUNK_DEPTH = 30  # chunks fetched per query; equals the rerank pool so all methods see the same depth
@@ -72,11 +72,14 @@ def run_ablation(
     scopes: Sequence[str] = ("doc", "corpus"),
     rerankers: dict[str, Reranker] | None = None,
 ) -> list[dict]:
-    """Run every (scope, method) pair. With `rerankers`, hybrid_rerank runs once
-    per named reranker and is labelled e.g. "hybrid_rerank[minilm]"."""
+    """Run every (scope, method) pair. With `rerankers`, each rerank method runs
+    once per named reranker and is labelled e.g. "hybrid_rerank[minilm]".
+
+    Results are merged into existing files in out_dir by (scope, label), so a
+    subset can be re-run without repeating slow configs."""
     variants: list[tuple[str, str, Reranker | None]] = []
     for method in methods:
-        if method == "hybrid_rerank" and rerankers:
+        if method in RERANK_METHODS and rerankers:
             variants += [(method, f"{method}[{name}]", r) for name, r in rerankers.items()]
         else:
             variants.append((method, method, retriever.reranker))
@@ -90,13 +93,30 @@ def run_ablation(
             print(f"{scope:6s} {label:22s} hit@5={summary['hit@5']:.3f} mrr={summary['mrr@10']:.3f}")
             summaries.append(summary)
             runs[f"{scope}/{label}"] = per_q
-    out_dir.mkdir(parents=True, exist_ok=True)
+    summaries, runs = _merge(out_dir, summaries, runs)
     (out_dir / "retrieval_ablation.json").write_text(
         json.dumps({"configs": summaries, "chunk_depth": CHUNK_DEPTH}, indent=2), encoding="utf-8"
     )
     (out_dir / "retrieval_ablation.md").write_text(to_markdown(summaries), encoding="utf-8")
     (out_dir / "retrieval_per_question.json").write_text(json.dumps(runs), encoding="utf-8")
     return summaries
+
+
+def _merge(out_dir: Path, new: list[dict], new_runs: dict) -> tuple[list[dict], dict]:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    summary_file = out_dir / "retrieval_ablation.json"
+    runs_file = out_dir / "retrieval_per_question.json"
+    if not (summary_file.exists() and runs_file.exists()):
+        return new, new_runs
+    old = json.loads(summary_file.read_text(encoding="utf-8"))["configs"]
+    runs = json.loads(runs_file.read_text(encoding="utf-8"))
+    by_key = {(s["scope"], s["method"]): s for s in old}
+    by_key.update({(s["scope"], s["method"]): s for s in new})
+    runs.update(new_runs)
+    # Stable order: doc scope first, then methods in the order they were first seen.
+    order = {k: i for i, k in enumerate([*by_key])}
+    merged = sorted(by_key.values(), key=lambda s: (s["scope"] != "doc", order[(s["scope"], s["method"])]))
+    return merged, runs
 
 
 def to_markdown(summaries: Sequence[dict]) -> str:

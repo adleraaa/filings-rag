@@ -57,7 +57,7 @@ def test_spend_tracker_cost_and_cap(tmp_path):
 
 def test_eval_retrieval_writes_results(index, tmp_path):
     summaries = run_ablation(index.retriever, QUESTIONS, tmp_path)
-    assert len(summaries) == 8
+    assert len(summaries) == 10  # 5 methods x 2 scopes
     by_key = {(s["scope"], s["method"]): s for s in summaries}
     assert by_key[("doc", "bm25")]["hit@10"] == 1.0  # a 3-page filing: top 10 covers everything
     assert by_key[("doc", "dense")]["doc_hit@5"] == 1.0  # doc-scoped can only return the right filing
@@ -164,3 +164,17 @@ def test_ablation_runs_each_named_reranker(index, tmp_path):
     assert [s["method"] for s in summaries] == ["hybrid_rerank[overlap]", "hybrid_rerank[reverse]"]
     # The rerankers disagree, so the two runs must not be identical.
     assert summaries[0]["mrr@10"] != summaries[1]["mrr@10"]
+
+
+def test_ablation_subset_rerun_merges_into_existing_results(index, tmp_path):
+    run_ablation(index.retriever, QUESTIONS, tmp_path, ["bm25", "dense"], ["doc"])
+    run_ablation(index.retriever, QUESTIONS, tmp_path, ["dense_rerank"], ["doc", "corpus"])
+    saved = json.loads((tmp_path / "retrieval_ablation.json").read_text())["configs"]
+    assert [(s["scope"], s["method"]) for s in saved] == [
+        ("doc", "bm25"),
+        ("doc", "dense"),
+        ("doc", "dense_rerank"),
+        ("corpus", "dense_rerank"),
+    ]
+    runs = json.loads((tmp_path / "retrieval_per_question.json").read_text())
+    assert set(runs) == {"doc/bm25", "doc/dense", "doc/dense_rerank", "corpus/dense_rerank"}

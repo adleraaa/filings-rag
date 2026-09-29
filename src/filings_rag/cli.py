@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 from .data import download, load_questions
-from .retrieval import METHODS
+from .retrieval import METHODS, RERANK_METHODS
 
 DATA = Path("data")
 QUESTIONS = DATA / "financebench_open_source.jsonl"
@@ -84,9 +84,9 @@ def cmd_eval_retrieval(args: argparse.Namespace) -> None:
     from .retrieval import CrossEncoderReranker
 
     index = load_index(args.index_dir, reranker=None)
-    rerankers = {name: CrossEncoderReranker(model) for name, model in RERANKERS.items()}
+    rerankers = {name: CrossEncoderReranker(RERANKERS[name]) for name in args.rerankers}
     questions = load_questions(args.questions)
-    run_ablation(index.retriever, questions, args.out, rerankers=rerankers)
+    run_ablation(index.retriever, questions, args.out, args.methods, args.scopes, rerankers)
 
 
 def parse_method(label: str) -> tuple[str, str | None]:
@@ -97,7 +97,7 @@ def parse_method(label: str) -> tuple[str, str | None]:
     if not m or m.group(1) not in METHODS or (m.group(2) and m.group(2) not in RERANKERS):
         raise argparse.ArgumentTypeError(f"unknown method {label!r}")
     method, reranker = m.groups()
-    if method == "hybrid_rerank":
+    if method in RERANK_METHODS:
         return method, reranker or DEFAULT_RERANKER
     return method, None
 
@@ -233,6 +233,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--index-dir", type=Path, default=INDEX)
     s.add_argument("--questions", type=Path, default=QUESTIONS)
     s.add_argument("--out", type=Path, default=RESULTS)
+    s.add_argument("--methods", nargs="+", choices=METHODS, default=list(METHODS))
+    s.add_argument("--scopes", nargs="+", choices=("doc", "corpus"), default=["doc", "corpus"])
+    s.add_argument("--rerankers", nargs="+", default=["minilm", "bge"], help="keys of index.RERANKERS")
     s.set_defaults(func=cmd_eval_retrieval)
 
     s = sub.add_parser("eval-generation", help="answer + judge + citation check (DeepSeek, costs money)")
