@@ -22,7 +22,7 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       # explorer/ holds a static page plus explorer.json exported from results/
       # (filings-rag export-explorer), so nothing needs to be built here.
       - uses: actions/upload-pages-artifact@v3

@@ -60,6 +60,7 @@ def test_eval_retrieval_writes_results(index, tmp_path):
     assert len(summaries) == 8
     by_key = {(s["scope"], s["method"]): s for s in summaries}
     assert by_key[("doc", "bm25")]["hit@10"] == 1.0  # a 3-page filing: top 10 covers everything
+    assert by_key[("doc", "dense")]["doc_hit@5"] == 1.0  # doc-scoped can only return the right filing
     assert json.loads((tmp_path / "retrieval_ablation.json").read_text())["configs"]
     assert "| doc | hybrid_rerank |" in (tmp_path / "retrieval_ablation.md").read_text()
     assert best_config(tmp_path, "doc") in {"bm25", "dense", "hybrid", "hybrid_rerank"}

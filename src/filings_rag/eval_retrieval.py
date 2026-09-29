@@ -38,6 +38,9 @@ def run_config(
                 **{f"hit@{k}": hit_at_k(ranked, gold, k) for k in KS},
                 **{f"recall@{k}": recall_at_k(ranked, gold, k) for k in KS},
                 "rr": reciprocal_rank(ranked, gold),
+                # Diagnostic for corpus-wide runs: did we at least reach the right
+                # filing? Separates "wrong document" from "right document, wrong page".
+                "doc_hit@5": float(any(doc == q.doc for doc, _ in ranked[:5])),
             }
         )
     summary = {
@@ -47,6 +50,11 @@ def run_config(
         **{f"hit@{k}": _mean(per_q, f"hit@{k}") for k in KS},
         **{f"recall@{k}": _mean(per_q, f"recall@{k}") for k in KS},
         "mrr@10": _mean(per_q, "rr"),
+        "doc_hit@5": _mean(per_q, "doc_hit@5"),
+        "hit@5_by_question_type": {
+            t: _mean([r for r in per_q if r["question_type"] == t], "hit@5")
+            for t in sorted({r["question_type"] for r in per_q})
+        },
         "median_latency_ms": round(1000 * statistics.median(latencies), 1),
     }
     return summary, per_q
@@ -92,7 +100,7 @@ def run_ablation(
 
 
 def to_markdown(summaries: Sequence[dict]) -> str:
-    cols = ["hit@1", "hit@3", "hit@5", "hit@10", "recall@5", "mrr@10", "median_latency_ms"]
+    cols = ["hit@1", "hit@3", "hit@5", "hit@10", "recall@5", "mrr@10", "doc_hit@5", "median_latency_ms"]
     lines = [
         "| scope | method | " + " | ".join(cols) + " |",
         "|---|---|" + "---|" * len(cols),
