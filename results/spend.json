@@ -1,9 +1,9 @@
 {
-  "calls": 310,
+  "calls": 311,
   "prompt_cache_hit_tokens": 23808,
-  "prompt_cache_miss_tokens": 510772,
-  "completion_tokens": 18155,
-  "cost_cny_upper_bound": 1.1677,
+  "prompt_cache_miss_tokens": 512803,
+  "completion_tokens": 18183,
+  "cost_cny_upper_bound": 1.172,
   "cap_cny": 3.0,
   "price_cny_per_million_tokens": {
     "input_cache_hit": 0.04,
@@ -35,6 +35,11 @@
       "calls": 150,
       "prompt_tokens": 49528,
       "completion_tokens": 5935
+    },
+    "ask": {
+      "calls": 1,
+      "prompt_tokens": 2031,
+      "completion_tokens": 28
     }
   }
 }

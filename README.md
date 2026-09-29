@@ -128,9 +128,10 @@ leaves out part of what was asked, or reaches the wrong conclusion. No citation 
 context. A check that only asks "is this number on the page?" cannot see those errors. Embedding
 similarity between the answer and its cited chunks did no better than chance either (AUROC 0.43).
 
-Spend (`results/spend.json`): 310 API calls (150 answers, 150 judgements, plus a smoke test and a
-4-question pilot), 534,580 prompt tokens and 18,155 completion tokens, **1.17 CNY** at DeepSeek's
-peak list price (an upper bound; off-peak is half price).
+Spend (`results/spend.json`, all calls ever made by this repo): 311 API calls (150 answers, 150
+judgements, a smoke test, a 4-question pilot and one `ask` demo), 536,611 prompt tokens and 18,183
+completion tokens, **1.17 CNY** at DeepSeek's peak list price (an upper bound; off-peak is half
+price).
 
 ## Architecture
 
