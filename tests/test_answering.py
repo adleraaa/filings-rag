@@ -1,6 +1,11 @@
+import random
+
+import pytest
+
 from filings_rag.citation_check import Number, check_answer, extract_numbers, is_supported
 from filings_rag.generate import NOT_FOUND, Answer, answer_question, parse_citations
 from filings_rag.judge import parse_verdict
+from filings_rag.null_baseline import false_accepts, perturb
 
 from .conftest import FakeLLM
 
@@ -63,6 +68,19 @@ def test_refusal_is_not_flagged():
     assert ans.is_refusal and not check_answer(ans, _page_text).flagged
 
 
+def test_answer_status_separates_hedged_partial_answers():
+    ctx = (("D", 1),)
+    assert Answer("Capex was 1,577 [D p.1].", (("D", 1),), ctx).status == "answered"
+    # Explains what is missing, cites pages, but claims no number: still a refusal.
+    explained = Answer(f"The excerpts lack FY2022 current assets [D p.1]. {NOT_FOUND}", (("D", 1),), ctx)
+    assert explained.status == "refusal"
+    # States a figure, then hedges: partial, and it must still be checked.
+    hedged = Answer(f"Net income was 5,363 [D p.1]. {NOT_FOUND}", (("D", 1),), ctx)
+    assert hedged.status == "partial" and not hedged.is_refusal
+    res = check_answer(hedged, _page_text)
+    assert res.flagged and res.unsupported_values == [5363.0]
+
+
 def test_answer_question_sends_labelled_context(index):
     hits = index.retriever.search("dividends per share", "bm25", k=2, docs=["GLOBEX_2021_10K"])
     llm = FakeLLM(["Dividends were $2.40 per share [GLOBEX_2021_10K p.2]."])
@@ -90,17 +108,55 @@ def test_arithmetic_mode_accepts_computed_values_only():
     ans = Answer(text, (("D", 1),), (("D", 1),))
     verbatim = check_answer(ans, lambda d, p: page.get((d, p)))
     assert verbatim.flagged and verbatim.unsupported_values == [590507.0, 65.4]
-    assert not check_answer(ans, lambda d, p: page.get((d, p)), arithmetic=True).flagged
-
-    # Two steps: average of two page values, then a ratio against a third.
-    two_step = Answer(
-        "Assets 5,121.3 and liabilities 7,491.5 average 6,306.4; 5,121.3 / 6,306.4 = 0.81 [D p.1].",
-        (("D", 1),),
-        (("D", 1),),
-    )
-    assert not check_answer(two_step, lambda d, p: page.get((d, p)), arithmetic=True).flagged
+    assert not check_answer(ans, lambda d, p: page.get((d, p)), mode="arithmetic").flagged
 
     # A number that no single step produces is still flagged.
     wrong = Answer("Operating income was 903,095 and margin 12.34% [D p.1].", (("D", 1),), (("D", 1),))
-    res = check_answer(wrong, lambda d, p: page.get((d, p)), arithmetic=True)
+    res = check_answer(wrong, lambda d, p: page.get((d, p)), mode="arithmetic")
     assert res.flagged and res.unsupported_values == [12.34]
+
+
+def test_arithmetic_mode_rejects_a_corrupted_number_the_loose_mode_accepted():
+    # 649,558 is 590,507 x 1.1 (a 10% error), and also 590,507 + 59,051. The loose
+    # mode's sums of arbitrary pairs accepted it; the strict mode must not.
+    page = {("D", 1): "Revenue 590,507. Other income 59,051. Segments 3."}
+    text = "Revenue was 590,507 [D p.1] and other income 59,051 [D p.1]; revenue grew to 649,558 [D p.1]."
+    ans = Answer(text, (("D", 1),), (("D", 1),))
+    strict = check_answer(ans, lambda d, p: page.get((d, p)), mode="arithmetic")
+    assert strict.flagged and strict.unsupported_values == [649558.0]
+    assert not check_answer(ans, lambda d, p: page.get((d, p)), mode="arithmetic_loose").flagged
+
+
+def test_arithmetic_mode_does_not_rescale_derived_values():
+    # 590,507 / 903,095 = 0.6539; shown as a percentage (65.4) is fine, but the
+    # same ratio "in thousands" (653.9) is not a meaningful derivation.
+    page = {("D", 1): "Operating income 1,493,602 and 903,095."}
+    ok = Answer("From 903,095 to 1,493,602, up 65.4% [D p.1].", (("D", 1),), (("D", 1),))
+    assert not check_answer(ok, lambda d, p: page.get((d, p)), mode="arithmetic").flagged
+    bad = Answer("From 903,095 to 1,493,602, up 653.9 [D p.1].", (("D", 1),), (("D", 1),))
+    assert check_answer(bad, lambda d, p: page.get((d, p)), mode="arithmetic").flagged
+    with pytest.raises(ValueError):
+        check_answer(ok, lambda d, p: page.get((d, p)), mode="fuzzy")
+
+
+def test_perturbations_keep_format_and_change_the_value():
+    rng = random.Random(0)
+    assert perturb("590,507", "x1.1", rng) == "649,558"
+    assert perturb("12.5", "x1.1", rng) == "13.8"
+    assert perturb("3", "x1.1", rng) is None  # 3.3 rounds back to 3
+    swapped = perturb("1,577", "digit_swap", rng)
+    assert swapped != "1,577" and sorted(swapped) == sorted("1,577")
+    assert perturb("11", "digit_swap", rng) is None
+    assert perturb("10", "digit_swap", rng) is None  # "01" would drop a digit
+    r = perturb("2.40", "random", rng)
+    assert len(r) == 4 and r[1] == "." and r[0] != "0"
+
+
+def test_false_accept_rate_counts_only_numbers_the_check_accepted():
+    page = {("D", 1): "Revenue 590,507. Margin 12.5 percent. Other 13.8 and 590,570"}
+    ans = Answer("Revenue 590,507 and margin 12.5% [D p.1].", (("D", 1),), (("D", 1),))
+    out = false_accepts([ans], lambda d, p: page.get((d, p)), "verbatim")
+    # x1.1: 649,558 is rejected, but 13.8 happens to be on the page, so it is accepted.
+    assert out["x1.1"]["numbers"] == 2 and out["x1.1"]["accepted"] == 1
+    assert out["x1.1"]["by_magnitude"]["<100"]["accepted"] == 1
+    assert out["x1.1"]["by_magnitude"][">=100"] == {"numbers": 1, "accepted": 0, "false_accept_rate": 0.0}

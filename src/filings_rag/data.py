@@ -1,8 +1,10 @@
 """FinanceBench question loading and PDF download.
 
 The FinanceBench open-source sample (https://github.com/patronus-ai/financebench)
-is distributed under CC BY-NC 4.0 (per its Hugging Face dataset card), so this
-repo does not redistribute it; `download` fetches it into data/ instead.
+is distributed under CC BY-NC 4.0 (per its Hugging Face dataset card). The raw
+question file and the PDFs are not committed; `download` fetches them into
+data/. Result files that quote questions and gold answers are covered by
+results/NOTICE.
 """
 
 from __future__ import annotations
@@ -52,6 +54,12 @@ def _fetch(url: str, dest: Path) -> None:
     with urllib.request.urlopen(url, timeout=120) as resp, tmp.open("wb") as out:
         while chunk := resp.read(1 << 16):
             out.write(chunk)
+    with tmp.open("rb") as f:
+        head = f.read(5)
+    if dest.suffix == ".pdf" and head != b"%PDF-":
+        # raw.githubusercontent.com serves a small text pointer for Git LFS files.
+        tmp.unlink()
+        raise RuntimeError(f"{url} did not return a PDF (a Git LFS pointer?)")
     tmp.replace(dest)  # atomic rename so an interrupted download is never "done"
 
 

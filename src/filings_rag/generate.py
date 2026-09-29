@@ -6,6 +6,7 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from .claims import BRACKET, claims
 from .llm import ChatModel
 from .retrieval import Hit
 
@@ -19,8 +20,6 @@ Rules:
 - Do not use outside knowledge. If the excerpts do not contain what is needed, reply exactly: {NOT_FOUND}
 - Be brief: at most 4 sentences."""
 
-# One bracket may hold several references separated by ';' or ','.
-_BRACKET = re.compile(r"\[([^\[\]]+)\]")
 _REF = re.compile(r"([A-Za-z0-9_.&-]+)\s+p\.?\s*(\d+)")
 
 
@@ -31,8 +30,22 @@ class Answer:
     context_pages: tuple[tuple[str, int], ...]
 
     @property
+    def status(self) -> str:
+        """One of "answered", "partial" or "refusal".
+
+        The model often hedges: it states some figures with citations and then
+        adds the NOT_FOUND sentence for the rest. Those answers make checkable
+        claims, so only an answer with the sentence and no numeric claim (apart
+        from years) is a refusal. Numbers are the criterion because numbers are
+        what the citation check verifies.
+        """
+        if NOT_FOUND.lower().rstrip(".") not in self.text.lower():
+            return "answered"
+        return "partial" if claims(self.text) else "refusal"
+
+    @property
     def is_refusal(self) -> bool:
-        return NOT_FOUND.lower().rstrip(".") in self.text.lower()
+        return self.status == "refusal"
 
 
 def format_context(hits: Sequence[Hit]) -> str:
@@ -44,7 +57,7 @@ def format_context(hits: Sequence[Hit]) -> str:
 
 def parse_citations(text: str) -> list[tuple[str, int]]:
     refs = []
-    for bracket in _BRACKET.findall(text):
+    for bracket in BRACKET.findall(text):
         for doc, page in _REF.findall(bracket):
             ref = (doc, int(page))
             if ref not in refs:

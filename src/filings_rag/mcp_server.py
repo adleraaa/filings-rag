@@ -15,15 +15,30 @@ from mcp.server.fastmcp import FastMCP
 
 from .index import Index, load_index
 
+# Legal-form words that users add but filing names leave out ("AES Corporation" -> AES_2022_10K).
+_SUFFIXES = re.compile(r"\b(?:CORPORATION|CORP|INCORPORATED|INC|COMPANY|CO|PLC|LTD|LLC|HOLDINGS|GROUP|THE)\b")
+
 
 def _norm(s: str) -> str:
-    return re.sub(r"[^A-Z0-9]", "", s.upper())
+    return re.sub(r"[^A-Z0-9]", "", _SUFFIXES.sub(" ", s.upper().replace("_", " ")))
+
+
+def company_of(doc: str) -> str:
+    """The company part of a filing name: everything before the first _YYYY
+    ("JOHNSON_JOHNSON_2022_10K" -> "JOHNSON_JOHNSON")."""
+    return re.split(r"_\d{4}", doc, maxsplit=1)[0]
+
+
+def company_names(index: Index) -> list[str]:
+    return sorted({company_of(d) for d in index.retriever.docs})
 
 
 def docs_for_company(index: Index, company: str) -> list[str]:
-    """Match "American Express" to AMERICANEXPRESS_2022_10K and so on."""
+    """Match "American Express" to AMERICANEXPRESS_2022_10K, "Johnson & Johnson"
+    to JOHNSON_JOHNSON_2022_10K, and so on. Exact match after normalising, so
+    "Pfizer" never picks up a different company whose name merely starts with it."""
     key = _norm(company)
-    return [d for d in index.retriever.docs if _norm(d.split("_")[0]) == key]
+    return [d for d in index.retriever.docs if key and _norm(company_of(d)) == key]
 
 
 def build_server(index: Index, method: str = "dense") -> FastMCP:
@@ -39,7 +54,10 @@ def build_server(index: Index, method: str = "dense") -> FastMCP:
         if company:
             docs = docs_for_company(index, company)
             if not docs:
-                return []
+                # An error the client can read beats an empty list it cannot explain.
+                raise ValueError(
+                    f"no filings for company {company!r}; known: {', '.join(company_names(index))}"
+                )
         hits = index.retriever.search(query, method=method, k=k, docs=docs)
         return [
             {"doc": h.chunk.doc, "page": h.chunk.page, "score": round(h.score, 4), "text": h.chunk.text}

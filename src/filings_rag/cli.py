@@ -66,23 +66,50 @@ def evidence_page_check(qfile: Path, page_text: dict) -> dict:
     def norm(s: str) -> str:
         return re.sub(r"\s+", " ", s).strip().lower()
 
+    def alnum(s: str) -> str:
+        return re.sub(r"[^a-z0-9]", "", s.lower())
+
     counts = {"labelled_page": 0, "page_before": 0, "page_after": 0}
+    # The three page counts can overlap (a snippet repeated on two pages), so
+    # items found on none of them are counted directly rather than by subtraction.
+    not_found = 0
+    # Of those, how many match the labelled page once spaces and punctuation are
+    # ignored, i.e. differ only in how the two PDF extractors laid out the text.
+    not_found_but_alnum_match = 0
     total = 0
     for line in qfile.open(encoding="utf-8"):
         for ev in json.loads(line)["evidence"]:
             snippet = norm(ev["evidence_text_full_page"])[50:150]
             page = ev["evidence_page_num"] + 1
             total += 1
+            found = False
             for name, p in (("labelled_page", page), ("page_before", page - 1), ("page_after", page + 1)):
-                counts[name] += snippet in norm(page_text.get((ev["doc_name"], p), ""))
-    return {"evidence_items": total, "snippet_found_on": counts}
+                hit = snippet in norm(page_text.get((ev["doc_name"], p), ""))
+                counts[name] += hit
+                found |= hit
+            if not found:
+                not_found += 1
+                # Drop 5 characters at each end: the 100-character cut may split a word.
+                core = alnum(snippet)[5:-5]
+                not_found_but_alnum_match += core in alnum(page_text.get((ev["doc_name"], page), ""))
+    return {
+        "evidence_items": total,
+        "snippet_found_on": counts,
+        "found_on_none_of_the_three": not_found,
+        "of_which_on_labelled_page_ignoring_spaces_and_punctuation": not_found_but_alnum_match,
+    }
 
 
 def cmd_eval_retrieval(args: argparse.Namespace) -> None:
-    from .eval_retrieval import run_ablation
+    from .eval_retrieval import run_ablation, to_markdown
     from .index import RERANKERS, load_index
     from .retrieval import CrossEncoderReranker
 
+    if args.markdown_only:
+        # Re-render the table from saved results without running retrieval again.
+        configs = json.loads((args.out / "retrieval_ablation.json").read_text(encoding="utf-8"))["configs"]
+        (args.out / "retrieval_ablation.md").write_text(to_markdown(configs), encoding="utf-8")
+        return
     index = load_index(args.index_dir, reranker=None)
     rerankers = {name: CrossEncoderReranker(RERANKERS[name]) for name in args.rerankers}
     questions = load_questions(args.questions)
@@ -123,7 +150,15 @@ def best_config(results_dir: Path, scope: str) -> str:
 
 
 def cmd_eval_generation(args: argparse.Namespace) -> None:
-    from .eval_generation import add_similarity, apply_checks, run_generation, summarize, to_markdown
+    from .eval_generation import (
+        add_null_baseline,
+        add_similarity,
+        apply_checks,
+        config_path,
+        run_generation,
+        summarize,
+        to_markdown,
+    )
     from .index import load_index
     from .llm import DeepSeekChat, SpendTracker
 
@@ -133,21 +168,26 @@ def cmd_eval_generation(args: argparse.Namespace) -> None:
     index = load_index(args.index_dir, reranker=reranker)
     tracker = SpendTracker.load(args.out / "spend.json", cap_cny=args.cap)
     questions = load_questions(args.questions)[: args.limit]
+    out = args.out / "generation.jsonl"
     rows = run_generation(
         index,
         questions,
         DeepSeekChat(tracker, "answer"),
         DeepSeekChat(tracker, "judge"),
-        args.out / "generation.jsonl",
+        out,
         method,
         args.scope,
         args.k,
+        label=label,
     )
     apply_checks(rows, index)
     add_similarity(rows, index, index.retriever.embedder)
     summary = summarize(rows)
-    summary["config"] = {"method": label, "scope": args.scope, "k_chunks": args.k}
-    summary["spend"] = tracker.to_dict()
+    add_null_baseline(summary, rows, index.page_text)
+    summary["config"] = json.loads(config_path(out).read_text(encoding="utf-8"))
+    # Spend is cumulative over every command that calls the API (including `ask`),
+    # so it lives in one file instead of a copy that goes stale.
+    summary["spend_file"] = "spend.json"
     (args.out / "generation_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     (args.out / "generation_summary.md").write_text(to_markdown(summary), encoding="utf-8")
     (args.out / "generation_with_similarity.jsonl").write_text(
@@ -161,18 +201,21 @@ def cmd_ask(args: argparse.Namespace) -> None:
     from .generate import answer_question
     from .index import load_index
     from .llm import DeepSeekChat, SpendTracker
-    from .mcp_server import docs_for_company
+    from .mcp_server import company_names, docs_for_company
 
     method, reranker = parse_method(args.method)
     index = load_index(args.index_dir, reranker=reranker)
     docs = [args.doc] if args.doc else (docs_for_company(index, args.company) if args.company else None)
+    if docs == [] or (args.doc and args.doc not in index.retriever.docs):
+        # Without this, retrieval returns nothing and we would pay for an empty-context answer.
+        sys.exit(f"no filing matches; companies in the index: {', '.join(company_names(index))}")
     hits = index.retriever.search(args.question, method=method, k=args.k, docs=docs)
     tracker = SpendTracker.load(RESULTS / "spend.json", cap_cny=args.cap)
     ans = answer_question(DeepSeekChat(tracker, "ask"), args.question, hits)
     print(ans.text)
     print(f"\ncontext pages: {', '.join(f'{d} p.{p}' for d, p in ans.context_pages)}")
-    for name, arithmetic in (("verbatim", False), ("arithmetic", True)):
-        check = check_answer(ans, index.page_text, arithmetic=arithmetic)
+    for name in ("verbatim", "arithmetic"):
+        check = check_answer(ans, index.page_text, mode=name)
         status = f"FLAGGED {', '.join(check.reasons)} {check.unsupported_values}" if check.flagged else "ok"
         print(f"citation check ({name}): {status}")
 
@@ -193,23 +236,33 @@ def export_explorer(results: Path) -> dict:
     generated = {}
     if gen_path.exists():
         generated = {r["qid"]: r for r in map(json.loads, gen_path.open(encoding="utf-8"))}
+    # Index every run by question id: runs may come from merged subset reruns,
+    # so their row order is not guaranteed to match.
+    by_qid = {cfg: {r["qid"]: r for r in rows} for cfg, rows in runs.items()}
+    first_seen: dict[str, dict] = {}
+    for rows in runs.values():
+        for r in rows:
+            first_seen.setdefault(r["qid"], r)
     questions = []
-    for i, first in enumerate(runs["doc/bm25"]):
-        g = generated.get(first["qid"], {})
+    for qid, first in first_seen.items():
+        g = generated.get(qid, {})
         questions.append(
             {
-                "qid": first["qid"],
+                "qid": qid,
                 "question_type": first["question_type"],
                 "doc": first["gold"][0][0],
                 "gold_pages": first["gold"],
                 "question": g.get("question", ""),
                 "gold_answer": g.get("gold_answer", ""),
                 "answer": g.get("answer", ""),
+                "status": g.get("status", ""),
                 "verdict": g.get("verdict", "not run"),
                 "judge_reason": g.get("judge_reason", ""),
                 "checks": g.get("checks", {}),
-                # Top-5 pages of every config for this question (runs are in question order).
-                "retrieval": {cfg: rows[i]["ranked_pages"][:5] for cfg, rows in runs.items()},
+                # Top-5 pages of every config that retrieved for this question.
+                "retrieval": {
+                    cfg: rows[qid]["ranked_pages"][:5] for cfg, rows in by_qid.items() if qid in rows
+                },
             }
         )
     return {"ablation": ablation, "questions": questions}
@@ -246,6 +299,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--methods", nargs="+", choices=METHODS, default=list(METHODS))
     s.add_argument("--scopes", nargs="+", choices=("doc", "corpus"), default=["doc", "corpus"])
     s.add_argument("--rerankers", nargs="+", default=["minilm", "bge"], help="keys of index.RERANKERS")
+    s.add_argument("--markdown-only", action="store_true", help="re-render the .md table from the saved JSON")
     s.set_defaults(func=cmd_eval_retrieval)
 
     s = sub.add_parser("bootstrap", help="paired bootstrap CIs of hit@5 vs dense retrieval")

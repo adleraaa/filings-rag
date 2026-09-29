@@ -84,9 +84,16 @@ class SpendTracker:
         }
 
     def save(self) -> None:
+        """Write via a temp file and rename, so a crash never leaves a torn spend.json.
+
+        Two processes calling the API at once would still overwrite each other's
+        totals; run paid commands one at a time.
+        """
         if self.path is not None:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.path.write_text(json.dumps(self.to_dict(), indent=2), encoding="utf-8")
+            tmp = self.path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(self.to_dict(), indent=2), encoding="utf-8")
+            os.replace(tmp, self.path)
 
     @classmethod
     def load(cls, path: Path, cap_cny: float) -> SpendTracker:
@@ -114,10 +121,15 @@ def read_api_key(env_file: Path = Path(".env")) -> str:
 
 
 class DeepSeekChat:
-    def __init__(self, tracker: SpendTracker, stage: str, model: str = DEFAULT_MODEL):
-        from openai import OpenAI
+    def __init__(self, tracker: SpendTracker, stage: str, model: str = DEFAULT_MODEL, client=None):
+        """`client` is any object with the OpenAI client's chat.completions.create (tests pass a fake)."""
+        if client is None:
+            from openai import OpenAI
 
-        self.client = OpenAI(api_key=read_api_key(), base_url=BASE_URL)
+            # The SDK retries 429s, 5xx and connection errors with exponential
+            # backoff; we only make the timeout and retry count explicit.
+            client = OpenAI(api_key=read_api_key(), base_url=BASE_URL, timeout=60.0, max_retries=4)
+        self.client = client
         self.tracker = tracker
         self.stage = stage
         self.model = model

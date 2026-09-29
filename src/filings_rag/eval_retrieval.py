@@ -120,7 +120,13 @@ def _merge(out_dir: Path, new: list[dict], new_runs: dict) -> tuple[list[dict], 
 
 
 def to_markdown(summaries: Sequence[dict]) -> str:
-    cols = ["hit@1", "hit@3", "hit@5", "hit@10", "recall@5", "mrr@10", "doc_hit@5", "median_latency_ms"]
+    cols = [
+        *(f"hit@{k}" for k in KS),
+        *(f"recall@{k}" for k in KS),
+        "mrr@10",
+        "doc_hit@5",
+        "median_latency_ms",
+    ]
     lines = [
         "| scope | method | " + " | ".join(cols) + " |",
         "|---|---|" + "---|" * len(cols),
