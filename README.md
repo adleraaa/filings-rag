@@ -10,6 +10,12 @@ judging, which use the DeepSeek API under a hard 3 CNY budget.
 Results explorer (static page, every question with retrieved pages, answer, verdict and flags):
 https://adleraaa.github.io/filings-rag/
 
+## How this was built
+
+This project was built with [Claude Code](https://claude.com/claude-code), an AI coding agent, on
+September 28, 2026 (14 of 14 commits carry a `Co-Authored-By: Claude` trailer). The numbers in this
+README come from the scripts and result files in this repository.
+
 ## Results
 
 Short version: plain dense retrieval (`bge-small-en-v1.5`) was the best setup; adding BM25 through
@@ -273,8 +279,9 @@ company returns an error that lists the known ones.
 - **One code path for doc-scoped and corpus-wide search.** Every retriever scores all chunks and
   then applies a document mask. The two scopes differ only in the mask, so their numbers are
   directly comparable.
-- **BM25 written by hand (about 40 lines, inverted index + numpy).** It is small enough to explain
-  line by line and fast enough (1 ms per query over 34k chunks) that it was never the bottleneck.
+- **BM25 implemented from scratch (no BM25 library; about 40 lines, inverted index + numpy).**
+  It is small enough to explain line by line and fast enough (1 ms per query over 34k chunks) that
+  it was never the bottleneck.
 - **Reciprocal rank fusion instead of score blending.** RRF only uses ranks, so unbounded BM25
   scores and cosine similarities need no normalisation. The results show its weakness too: equal
   weights let a weak ranker drag down a strong one.
