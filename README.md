@@ -10,13 +10,6 @@ judging, which use the DeepSeek API under a hard 3 CNY budget.
 Results explorer (static page, every question with retrieved pages, answer, verdict and flags):
 https://adleraaa.github.io/filings-rag/
 
-## How this was built
-
-This project was built with [Claude Code](https://claude.com/claude-code), an AI coding agent.
-All 14 commits made on September 28, 2026 (US Eastern) carry a `Co-Authored-By: Claude` trailer,
-and later README edits were also made with Claude Code. The numbers in this README come from the
-scripts and result files in this repository.
-
 ## Results
 
 Short version: plain dense retrieval (`bge-small-en-v1.5`) was the best setup; adding BM25 through
